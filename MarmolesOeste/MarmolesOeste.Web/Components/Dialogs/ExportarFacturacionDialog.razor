@@ -1,0 +1,62 @@
+<MudDialog>
+    <TitleContent>Exportar facturación</TitleContent>
+    <DialogContent>
+        <MudStack Spacing="4">
+            <MudStack Row="true" Spacing="2">
+                <MudSelect T="int" @bind-Value="_mes" Label="Mes" Class="flex-grow-1">
+                    @for (var m = 1; m <= 12; m++)
+                    {
+                        var mes = m;
+                        <MudSelectItem T="int" Value="@mes">@_nombresMeses[mes - 1]</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudNumericField T="int" @bind-Value="_anio" Label="Año" Min="2000" Max="2100" Class="flex-grow-1" />
+            </MudStack>
+
+            <div>
+                <MudText Typo="Typo.body2" Class="mb-1">Formato</MudText>
+                <MudButtonGroup Variant="Variant.Outlined" OverrideStyles="false">
+                    <MudButton Variant="@(_formato == "excel" ? Variant.Filled : Variant.Outlined)"
+                               Color="@(_formato == "excel" ? Color.Success : Color.Default)"
+                               StartIcon="@Icons.Material.Filled.GridOn"
+                               OnClick="@(() => _formato = "excel")">
+                        Excel
+                    </MudButton>
+                    <MudButton Variant="@(_formato == "pdf" ? Variant.Filled : Variant.Outlined)"
+                               Color="@(_formato == "pdf" ? Color.Success : Color.Default)"
+                               StartIcon="@Icons.Material.Filled.PictureAsPdf"
+                               OnClick="@(() => _formato = "pdf")">
+                        PDF
+                    </MudButton>
+                </MudButtonGroup>
+            </div>
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancelar</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Download"
+                   Href="@ExportUrl" Target="_blank" OnClick="Cerrar">
+            Exportar
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    private static readonly string[] _nombresMeses =
+    [
+        "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+        "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+    ];
+
+    private int _mes = DateTime.Today.Month;
+    private int _anio = DateTime.Today.Year;
+    private string _formato = "excel";
+
+    private string ExportUrl => $"/api/facturacion/exportar?year={_anio}&month={_mes}&formato={_formato}";
+
+    private void Cerrar() => MudDialog.Close(DialogResult.Ok(true));
+
+    private void Cancel() => MudDialog.Cancel();
+}

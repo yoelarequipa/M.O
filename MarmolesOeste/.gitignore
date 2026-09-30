@@ -1,0 +1,17 @@
+# Build artifacts
+[Bb]in/
+[Oo]bj/
+out/
+
+# IDE / editor
+.vs/
+.vscode/
+*.user
+*.suo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

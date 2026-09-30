@@ -1,0 +1,115 @@
+@page "/terminaciones-canto"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = Roles.Dueno)]
+@using MarmolesOeste.Web.Components.Dialogs
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<PageTitle>Terminaciones de canto</PageTitle>
+
+<MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h4">Terminaciones de canto</MudText>
+    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3">
+        @if (_ultimaActualizacion is not null)
+        {
+            <MudPaper Class="pa-2 px-3" Outlined="true">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Última actualización</MudText>
+                <MudText Typo="Typo.body2">
+                    @_ultimaActualizacion.FechaUltimaActualizacion!.Value.ToLocalTime().ToString("dd/MM/yyyy")
+                    — @_ultimaActualizacion.Nombre: @_ultimaActualizacion.MotivoUltimaActualizacion
+                </MudText>
+            </MudPaper>
+        }
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreateAsync">
+            Nueva terminación
+        </MudButton>
+    </MudStack>
+</MudStack>
+
+<MudTable Items="_terminaciones" Loading="_loading" Hover="true">
+    <HeaderContent>
+        <MudTh>Nombre</MudTh>
+        <MudTh>Precio por metro lineal</MudTh>
+        <MudTh></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Nombre">@context.Nombre</MudTd>
+        <MudTd DataLabel="Precio por metro lineal">@context.PrecioPorMetroLineal.ToString("C2")</MudTd>
+        <MudTd>
+            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => OpenEditAsync(context)" />
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DarDeBajaAsync(context)" />
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText>No hay terminaciones cargadas.</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@code {
+    private List<TerminacionCanto> _terminaciones = new();
+    private TerminacionCanto? _ultimaActualizacion;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _terminaciones = await db.TerminacionesCanto.OrderBy(t => t.Nombre).ToListAsync();
+        _ultimaActualizacion = _terminaciones
+            .Where(t => t.FechaUltimaActualizacion is not null)
+            .OrderByDescending(t => t.FechaUltimaActualizacion)
+            .FirstOrDefault();
+        _loading = false;
+    }
+
+    private async Task OpenCreateAsync()
+    {
+        var reference = await DialogService.ShowAsync<TerminacionCantoEditDialog>("Nueva terminación de canto");
+        var result = await reference.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task OpenEditAsync(TerminacionCanto terminacion)
+    {
+        var parameters = new DialogParameters<TerminacionCantoEditDialog> { { x => x.TerminacionCantoId, terminacion.Id } };
+        var reference = await DialogService.ShowAsync<TerminacionCantoEditDialog>("Editar terminación de canto", parameters);
+        var result = await reference.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task DarDeBajaAsync(TerminacionCanto terminacion)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { x => x.Title, "Confirmar baja" },
+            { x => x.Message, $"¿Dar de baja \"{terminacion.Nombre}\"?" },
+            { x => x.ConfirmText, "Dar de baja" },
+        };
+        var reference = await DialogService.ShowAsync<ConfirmDialog>(null, parameters);
+        var result = await reference.Result;
+
+        if (result is not { Canceled: false })
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.TerminacionesCanto.FindAsync(terminacion.Id);
+        if (entity is not null)
+        {
+            entity.FechaBaja = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            Snackbar.Add("Terminación dada de baja.", Severity.Success);
+            await LoadAsync();
+        }
+    }
+}

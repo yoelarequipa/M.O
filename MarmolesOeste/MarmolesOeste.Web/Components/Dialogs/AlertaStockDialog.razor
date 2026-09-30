@@ -1,0 +1,56 @@
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<MudDialog>
+    <TitleContent>Alerta de stock — @NombreMaterial</TitleContent>
+    <DialogContent>
+        <MudForm @ref="_form">
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+                Cuando el stock disponible de este material caiga a esta cantidad o menos, va a aparecer en la alerta de stock del Inicio (si la alerta está activada para este material).
+            </MudText>
+            <MudNumericField @bind-Value="_cantidad" Label="Cantidad mínima (m²)" Required="true" Min="0.01m" Format="N2" />
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancelar</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Guardar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public int MaterialId { get; set; }
+    [Parameter] public string NombreMaterial { get; set; } = string.Empty;
+    [Parameter] public decimal? CantidadActual { get; set; }
+
+    private MudForm _form = null!;
+    private decimal _cantidad;
+
+    protected override void OnInitialized()
+    {
+        _cantidad = CantidadActual ?? 0m;
+    }
+
+    private async Task SaveAsync()
+    {
+        await _form.ValidateAsync();
+        if (!_form.IsValid)
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var material = await db.Materiales.FindAsync(MaterialId);
+        if (material is null)
+        {
+            MudDialog.Cancel();
+            return;
+        }
+
+        material.AlertaStockCantidad = _cantidad;
+        await db.SaveChangesAsync();
+
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

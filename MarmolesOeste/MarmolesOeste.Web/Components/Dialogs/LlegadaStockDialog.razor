@@ -1,0 +1,45 @@
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<MudDialog>
+    <TitleContent>Programar llegada de camión</TitleContent>
+    <DialogContent>
+        <MudForm @ref="_form">
+            <MudDatePicker @bind-Date="_fecha" Label="Fecha estimada" Required="true" Class="mb-2" />
+            <MudTextField @bind-Value="_descripcion" Label="Descripción" Required="true" RequiredError="Contá qué viene o de qué proveedor"
+                          Lines="2" HelperText="Ej: 'Proveedor Rocamar - 20 placas de granito negro'" />
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancelar</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Guardar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    private MudForm _form = null!;
+    private DateTime? _fecha = DateTime.Today.AddDays(1);
+    private string _descripcion = string.Empty;
+
+    private async Task SaveAsync()
+    {
+        await _form.ValidateAsync();
+        if (!_form.IsValid || _fecha is null)
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        db.LlegadasStock.Add(new LlegadaStock
+        {
+            FechaEstimada = DateTime.SpecifyKind(_fecha.Value, DateTimeKind.Utc),
+            Descripcion = _descripcion,
+        });
+        await db.SaveChangesAsync();
+
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

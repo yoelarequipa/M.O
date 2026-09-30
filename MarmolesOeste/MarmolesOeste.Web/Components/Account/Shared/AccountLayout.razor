@@ -1,0 +1,10 @@
+@inherits LayoutComponentBase
+
+@* Layout separado del MainLayout de la app (que es MudBlazor e interactivo).
+   Las páginas de Identity (login, registro, etc.) necesitan quedar completamente
+   aisladas de esa parte interactiva: por eso no usan MudBlazor acá, solo Bootstrap,
+   y por eso este layout no tiene rendermode propio ni depende del de la app. *@
+
+<div class="container my-4">
+    @Body
+</div>

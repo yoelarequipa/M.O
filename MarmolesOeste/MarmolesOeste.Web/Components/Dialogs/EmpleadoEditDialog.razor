@@ -1,0 +1,84 @@
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<MudDialog>
+    <TitleContent>@(EmpleadoId == 0 ? "Nuevo empleado" : "Editar empleado")</TitleContent>
+    <DialogContent>
+        <MudForm @ref="_form" Model="_model">
+            <MudTextField @bind-Value="_model.Nombre" Label="Nombre" Required="true" RequiredError="El nombre es obligatorio" Class="mb-2" />
+            <MudTextField @bind-Value="_model.Puesto" Label="Puesto" Class="mb-2" HelperText="Ej: Oficial cortador, ayudante, chofer" />
+            <MudTextField @bind-Value="_model.Telefono" Label="Teléfono" Class="mb-2" />
+            <MudTextField @bind-Value="_model.Email" Label="Email" InputType="InputType.Email" />
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancelar</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Guardar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public int EmpleadoId { get; set; }
+
+    private MudForm _form = null!;
+    private Empleado _model = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (EmpleadoId == 0)
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var existing = await db.Empleados.FindAsync(EmpleadoId);
+        if (existing is not null)
+        {
+            _model = new Empleado
+            {
+                Id = existing.Id,
+                Nombre = existing.Nombre,
+                Puesto = existing.Puesto,
+                Telefono = existing.Telefono,
+                Email = existing.Email,
+            };
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        await _form.ValidateAsync();
+        if (!_form.IsValid)
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        if (EmpleadoId == 0)
+        {
+            db.Empleados.Add(new Empleado
+            {
+                Nombre = _model.Nombre,
+                Puesto = _model.Puesto,
+                Telefono = _model.Telefono,
+                Email = _model.Email,
+            });
+        }
+        else
+        {
+            var existing = await db.Empleados.FindAsync(EmpleadoId);
+            if (existing is not null)
+            {
+                existing.Nombre = _model.Nombre;
+                existing.Puesto = _model.Puesto;
+                existing.Telefono = _model.Telefono;
+                existing.Email = _model.Email;
+            }
+        }
+
+        await db.SaveChangesAsync();
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

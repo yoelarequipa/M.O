@@ -1,0 +1,128 @@
+@page "/clientes"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using MarmolesOeste.Web.Components.Dialogs
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject NavigationManager NavigationManager
+
+<PageTitle>Clientes</PageTitle>
+
+<MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h4">Clientes</MudText>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreateAsync">
+        Nuevo cliente
+    </MudButton>
+</MudStack>
+
+<MudTextField @bind-Value="_busqueda" Label="Buscar" Placeholder="Nombre, teléfono, email o dirección"
+              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" Class="mb-4" />
+
+<MudTable Items="_clientes" Loading="_loading" Hover="true" Filter="new Func<Cliente, bool>(Coincide)">
+    <HeaderContent>
+        <MudTh>Nombre</MudTh>
+        <MudTh>Teléfono</MudTh>
+        <MudTh>Email</MudTh>
+        <MudTh>Dirección de la obra</MudTh>
+        <MudTh></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Nombre">@context.Nombre</MudTd>
+        <MudTd DataLabel="Teléfono">@context.Telefono</MudTd>
+        <MudTd DataLabel="Email">@context.Email</MudTd>
+        <MudTd DataLabel="Dirección de la obra">@context.DireccionObra</MudTd>
+        <MudTd>
+            <MudTooltip Text="Ver historial de compras">
+                <MudIconButton Icon="@Icons.Material.Filled.History" Size="Size.Small"
+                               OnClick="@(() => NavigationManager.NavigateTo($"/clientes/{context.Id}"))" />
+            </MudTooltip>
+            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => OpenEditAsync(context)" />
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DarDeBajaAsync(context)" />
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText>No hay clientes cargados.</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@code {
+    private List<Cliente> _clientes = new();
+    private bool _loading = true;
+    private string _busqueda = string.Empty;
+
+    private bool Coincide(Cliente cliente)
+    {
+        if (string.IsNullOrWhiteSpace(_busqueda))
+        {
+            return true;
+        }
+
+        var texto = _busqueda.Trim();
+        return Contiene(cliente.Nombre, texto)
+            || Contiene(cliente.Telefono, texto)
+            || Contiene(cliente.Email, texto)
+            || Contiene(cliente.DireccionObra, texto);
+    }
+
+    private static bool Contiene(string? campo, string texto) =>
+        campo is not null && campo.Contains(texto, StringComparison.OrdinalIgnoreCase);
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _clientes = await db.Clientes.OrderBy(c => c.Nombre).ToListAsync();
+        _loading = false;
+    }
+
+    private async Task OpenCreateAsync()
+    {
+        var reference = await DialogService.ShowAsync<ClienteEditDialog>("Nuevo cliente");
+        var result = await reference.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task OpenEditAsync(Cliente cliente)
+    {
+        var parameters = new DialogParameters<ClienteEditDialog> { { x => x.ClienteId, cliente.Id } };
+        var reference = await DialogService.ShowAsync<ClienteEditDialog>("Editar cliente", parameters);
+        var result = await reference.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task DarDeBajaAsync(Cliente cliente)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { x => x.Title, "Confirmar baja" },
+            { x => x.Message, $"¿Dar de baja al cliente \"{cliente.Nombre}\"?" },
+            { x => x.ConfirmText, "Dar de baja" },
+        };
+        var reference = await DialogService.ShowAsync<ConfirmDialog>(null, parameters);
+        var result = await reference.Result;
+
+        if (result is not { Canceled: false })
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.Clientes.FindAsync(cliente.Id);
+        if (entity is not null)
+        {
+            entity.FechaBaja = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            Snackbar.Add("Cliente dado de baja.", Severity.Success);
+            await LoadAsync();
+        }
+    }
+}

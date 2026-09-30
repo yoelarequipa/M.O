@@ -1,0 +1,53 @@
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<MudDialog>
+    <TitleContent>Programar entrega</TitleContent>
+    <DialogContent>
+        <MudForm @ref="_form">
+            <MudDatePicker @bind-Date="_fecha" Label="Fecha programada" Required="true" Class="mb-2" />
+            <MudTextField @bind-Value="_direccion" Label="Dirección" Required="true" RequiredError="La dirección es obligatoria" Lines="2" />
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancelar</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Programar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public int VentaId { get; set; }
+    [Parameter] public string DireccionSugerida { get; set; } = string.Empty;
+
+    private MudForm _form = null!;
+    private DateTime? _fecha = DateTime.Today.AddDays(1);
+    private string _direccion = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        _direccion = DireccionSugerida;
+    }
+
+    private async Task SaveAsync()
+    {
+        await _form.ValidateAsync();
+        if (!_form.IsValid || _fecha is null)
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        db.Entregas.Add(new Entrega
+        {
+            VentaId = VentaId,
+            FechaProgramada = DateTime.SpecifyKind(_fecha.Value, DateTimeKind.Utc),
+            Direccion = _direccion,
+            Estado = EstadoEntrega.Programada,
+        });
+        await db.SaveChangesAsync();
+
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

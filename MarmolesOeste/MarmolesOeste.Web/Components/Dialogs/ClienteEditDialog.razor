@@ -1,0 +1,78 @@
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<MudDialog>
+    <TitleContent>@(ClienteId == 0 ? "Nuevo cliente" : "Editar cliente")</TitleContent>
+    <DialogContent>
+        <ClienteFormFields @ref="_campos" Model="_model" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancelar</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Guardar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public int ClienteId { get; set; }
+
+    private ClienteFormFields _campos = null!;
+    private Cliente _model = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (ClienteId == 0)
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var existing = await db.Clientes.FindAsync(ClienteId);
+        if (existing is not null)
+        {
+            _model = new Cliente
+            {
+                Id = existing.Id,
+                Nombre = existing.Nombre,
+                Telefono = existing.Telefono,
+                Email = existing.Email,
+                DireccionObra = existing.DireccionObra,
+            };
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (!await _campos.ValidateAsync())
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        if (ClienteId == 0)
+        {
+            db.Clientes.Add(new Cliente
+            {
+                Nombre = _model.Nombre,
+                Telefono = _model.Telefono,
+                Email = _model.Email,
+                DireccionObra = _model.DireccionObra,
+            });
+        }
+        else
+        {
+            var existing = await db.Clientes.FindAsync(ClienteId);
+            if (existing is not null)
+            {
+                existing.Nombre = _model.Nombre;
+                existing.Telefono = _model.Telefono;
+                existing.Email = _model.Email;
+                existing.DireccionObra = _model.DireccionObra;
+            }
+        }
+
+        await db.SaveChangesAsync();
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

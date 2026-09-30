@@ -1,0 +1,300 @@
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<MudDialog>
+    <TitleContent>@(PresupuestoPiezaId == 0 ? "Agregar pieza" : "Editar pieza")</TitleContent>
+    <DialogContent>
+        <MudGrid>
+            <MudItem xs="12" md="7">
+                <MudForm @ref="_form">
+                    <MudSelect T="FormaPieza" Value="_forma" Label="Forma" Required="true" Class="mb-2" ValueChanged="OnFormaChanged">
+                        @foreach (var forma in Enum.GetValues<FormaPieza>())
+                        {
+                            <MudSelectItem T="FormaPieza" Value="@forma">@forma</MudSelectItem>
+                        }
+                    </MudSelect>
+
+                    @for (var i = 0; i < _tramos.Count; i++)
+                    {
+                        var index = i;
+                        <MudNumericField @bind-Value="_tramos[index]" Label="@($"Largo tramo {index + 1} (metros)")" Min="0.01m" Format="N2" Class="mb-2" />
+                    }
+
+                    <MudNumericField @bind-Value="_profundidad" Label="Profundidad (metros)" Required="true" Min="0.01m" Format="N2" Class="mb-2" />
+
+                    <MudSelect T="int" @bind-Value="_materialId" Label="Material" Required="true" RequiredError="Elegí un material" Class="mb-2">
+                        @foreach (var material in _materiales)
+                        {
+                            <MudSelectItem T="int" Value="@material.Id">@material.Nombre (@material.PrecioPorM2.ToString("C2")/m²)</MudSelectItem>
+                        }
+                    </MudSelect>
+
+                    <MudSelect T="int" @bind-Value="_terminacionCantoId" Label="Terminación de canto" Required="true" RequiredError="Elegí una terminación" Class="mb-2">
+                        @foreach (var terminacion in _terminaciones)
+                        {
+                            <MudSelectItem T="int" Value="@terminacion.Id">@terminacion.Nombre (@terminacion.PrecioPorMetroLineal.ToString("C2")/ml)</MudSelectItem>
+                        }
+                    </MudSelect>
+
+                    <MudCheckBox T="bool" @bind-Value="_llevaZocalo" Label="Lleva zócalo" Class="mb-2" />
+
+                    <MudDivider Class="my-3" />
+                    <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-2">
+                        <MudText Typo="Typo.body2">Calados (bacha / anafe)</MudText>
+                        <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AgregarCalado">Agregar</MudButton>
+                    </MudStack>
+                    @foreach (var calado in _calados)
+                    {
+                        var item = calado;
+                        <MudPaper Outlined="true" Class="pa-2 mb-2">
+                            <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-1">
+                                <MudSelect T="TipoCalado" @bind-Value="item.Tipo" Label="Tipo" Style="max-width:160px">
+                                    @foreach (var tipo in Enum.GetValues<TipoCalado>())
+                                    {
+                                        <MudSelectItem T="TipoCalado" Value="@tipo">@tipo</MudSelectItem>
+                                    }
+                                </MudSelect>
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => _calados.Remove(item)" />
+                            </MudStack>
+                            @if (_tramos.Count > 1)
+                            {
+                                <MudSelect T="int" @bind-Value="item.TramoOrden" Label="Tramo" Class="mb-2">
+                                    @for (var i = 1; i <= _tramos.Count; i++)
+                                    {
+                                        var n = i;
+                                        <MudSelectItem T="int" Value="@n">Tramo @n (@_tramos[n - 1].ToString("N2")m)</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            }
+                            <MudGrid Spacing="2">
+                                <MudItem xs="6">
+                                    <MudNumericField @bind-Value="item.Ancho" Label="Ancho (m)" Min="0.01m" Format="N2" />
+                                </MudItem>
+                                <MudItem xs="6">
+                                    <MudNumericField @bind-Value="item.Fondo" Label="Fondo (m)" Min="0.01m" Format="N2" />
+                                </MudItem>
+                                <MudItem xs="6">
+                                    <MudNumericField @bind-Value="item.DistanciaLateral" Label="Desde inicio del tramo (m)" Min="0m" Format="N2" />
+                                </MudItem>
+                                <MudItem xs="6">
+                                    <MudNumericField @bind-Value="item.DistanciaFrontal" Label="Desde borde frontal (m)" Min="0m" Format="N2" />
+                                </MudItem>
+                            </MudGrid>
+                        </MudPaper>
+                    }
+                </MudForm>
+            </MudItem>
+            <MudItem xs="12" md="5">
+                <MudText Typo="Typo.body2" Class="mb-2">Vista superior (aproximada)</MudText>
+                <PiezaDiagrama Forma="_forma" Tramos="_tramos" Profundidad="_profundidad" LlevaZocalo="_llevaZocalo"
+                               ColorHex="@SelectedMaterialColor()" Calados="@CaladosPreview()" />
+                <MudDivider Class="my-3" />
+                <MudText Typo="Typo.body2">Área de mesada: @AreaM2Preview().ToString("N2") m²</MudText>
+                @if (_llevaZocalo)
+                {
+                    <MudText Typo="Typo.caption">
+                        Zócalo: @_tramos.Sum().ToString("N2") ml (≈@AreaZocaloPreview().ToString("N2") m² estimados de material, a @(PresupuestoCalculos.AlturaZocaloEstimadaM * 100)cm de alto)
+                    </MudText>
+                }
+                <MudText Typo="Typo.h6" Class="mt-2">Subtotal de la pieza: @SubtotalPreview().ToString("C2")</MudText>
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancelar</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Guardar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public int PresupuestoId { get; set; }
+    [Parameter] public int PresupuestoPiezaId { get; set; }
+
+    private MudForm _form = null!;
+    private List<Material> _materiales = new();
+    private List<TerminacionCanto> _terminaciones = new();
+
+    private FormaPieza _forma = FormaPieza.Recta;
+    private List<decimal> _tramos = new() { 0m };
+    private decimal _profundidad = 0.6m;
+    private int _materialId;
+    private int _terminacionCantoId;
+    private bool _llevaZocalo;
+    private List<CaladoEditItem> _calados = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _materiales = await db.Materiales.OrderBy(m => m.Nombre).ToListAsync();
+        _terminaciones = await db.TerminacionesCanto.OrderBy(t => t.Nombre).ToListAsync();
+
+        if (PresupuestoPiezaId == 0)
+        {
+            return;
+        }
+
+        var existing = await db.PresupuestoPiezas
+            .Include(p => p.Tramos)
+            .Include(p => p.Calados)
+            .FirstOrDefaultAsync(p => p.Id == PresupuestoPiezaId);
+
+        if (existing is null)
+        {
+            return;
+        }
+
+        _forma = existing.Forma;
+        _profundidad = existing.Profundidad;
+        _materialId = existing.MaterialId;
+        _terminacionCantoId = existing.TerminacionCantoId;
+        _llevaZocalo = existing.LlevaZocalo;
+        _tramos = existing.Tramos.OrderBy(t => t.Orden).Select(t => t.Largo).ToList();
+        _calados = existing.Calados.Select(c => new CaladoEditItem
+        {
+            Tipo = c.Tipo,
+            TramoOrden = c.TramoOrden,
+            Ancho = c.Ancho,
+            Fondo = c.Fondo,
+            DistanciaLateral = c.DistanciaLateral,
+            DistanciaFrontal = c.DistanciaFrontal,
+        }).ToList();
+        AjustarCantidadTramos();
+    }
+
+    private void OnFormaChanged(FormaPieza nuevaForma)
+    {
+        _forma = nuevaForma;
+        AjustarCantidadTramos();
+    }
+
+    private void AgregarCalado()
+    {
+        _calados.Add(new CaladoEditItem { Ancho = 0.5m, Fondo = 0.5m });
+    }
+
+    private string? SelectedMaterialColor() => _materiales.FirstOrDefault(m => m.Id == _materialId)?.ColorHex;
+
+    private List<CaladoInfo> CaladosPreview() =>
+        _calados.Select(c => new CaladoInfo(c.Tipo, c.TramoOrden, c.Ancho, c.Fondo, c.DistanciaLateral, c.DistanciaFrontal)).ToList();
+
+    private void AjustarCantidadTramos()
+    {
+        var cantidad = _forma switch
+        {
+            FormaPieza.Recta => 1,
+            FormaPieza.L => 2,
+            FormaPieza.U => 3,
+            _ => 1,
+        };
+
+        while (_tramos.Count < cantidad)
+        {
+            _tramos.Add(0m);
+        }
+
+        while (_tramos.Count > cantidad)
+        {
+            _tramos.RemoveAt(_tramos.Count - 1);
+        }
+    }
+
+    private decimal AreaM2Preview() => _tramos.Sum() * _profundidad;
+
+    private decimal AreaZocaloPreview() => _llevaZocalo ? _tramos.Sum() * PresupuestoCalculos.AlturaZocaloEstimadaM : 0m;
+
+    private decimal SubtotalPreview()
+    {
+        var material = _materiales.FirstOrDefault(m => m.Id == _materialId);
+        var terminacion = _terminaciones.FirstOrDefault(t => t.Id == _terminacionCantoId);
+        var largoTotal = _tramos.Sum();
+
+        var subtotal = AreaM2Preview() * (material?.PrecioPorM2 ?? 0m)
+            + largoTotal * (terminacion?.PrecioPorMetroLineal ?? 0m);
+
+        if (_llevaZocalo)
+        {
+            subtotal += largoTotal * (material?.PrecioPorMetroLinealZocalo ?? 0m);
+        }
+
+        return subtotal;
+    }
+
+    private async Task SaveAsync()
+    {
+        await _form.ValidateAsync();
+        if (!_form.IsValid || _materialId == 0 || _terminacionCantoId == 0 || _tramos.Any(t => t <= 0))
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var material = await db.Materiales.FindAsync(_materialId);
+        var terminacion = await db.TerminacionesCanto.FindAsync(_terminacionCantoId);
+        if (material is null || terminacion is null)
+        {
+            return;
+        }
+
+        PresupuestoPieza pieza;
+        if (PresupuestoPiezaId == 0)
+        {
+            pieza = new PresupuestoPieza { PresupuestoId = PresupuestoId };
+            db.PresupuestoPiezas.Add(pieza);
+        }
+        else
+        {
+            pieza = await db.PresupuestoPiezas.Include(p => p.Tramos).Include(p => p.Calados).FirstAsync(p => p.Id == PresupuestoPiezaId);
+            db.PresupuestoPiezaTramos.RemoveRange(pieza.Tramos);
+            pieza.Tramos.Clear();
+            db.PresupuestoPiezaCalados.RemoveRange(pieza.Calados);
+            pieza.Calados.Clear();
+        }
+
+        pieza.Forma = _forma;
+        pieza.Profundidad = _profundidad;
+        pieza.LlevaZocalo = _llevaZocalo;
+        pieza.MaterialId = material.Id;
+        pieza.NombreMaterialCongelado = material.Nombre;
+        pieza.PrecioMaterialCongelado = material.PrecioPorM2;
+        pieza.PrecioZocaloCongelado = material.PrecioPorMetroLinealZocalo;
+        pieza.ColorMaterialCongelado = material.ColorHex;
+        pieza.TerminacionCantoId = terminacion.Id;
+        pieza.NombreTerminacionCongelado = terminacion.Nombre;
+        pieza.PrecioTerminacionCongelado = terminacion.PrecioPorMetroLineal;
+
+        for (var i = 0; i < _tramos.Count; i++)
+        {
+            pieza.Tramos.Add(new PresupuestoPiezaTramo { Orden = i + 1, Largo = _tramos[i] });
+        }
+
+        foreach (var calado in _calados)
+        {
+            pieza.Calados.Add(new PresupuestoPiezaCalado
+            {
+                Tipo = calado.Tipo,
+                TramoOrden = calado.TramoOrden,
+                Ancho = calado.Ancho,
+                Fondo = calado.Fondo,
+                DistanciaLateral = calado.DistanciaLateral,
+                DistanciaFrontal = calado.DistanciaFrontal,
+            });
+        }
+
+        await db.SaveChangesAsync();
+        await PresupuestoCalculos.RecalcularTotalesAsync(db, PresupuestoId);
+
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private sealed class CaladoEditItem
+    {
+        public TipoCalado Tipo { get; set; } = TipoCalado.Bacha;
+        public int TramoOrden { get; set; } = 1;
+        public decimal Ancho { get; set; }
+        public decimal Fondo { get; set; }
+        public decimal DistanciaLateral { get; set; }
+        public decimal DistanciaFrontal { get; set; }
+    }
+}

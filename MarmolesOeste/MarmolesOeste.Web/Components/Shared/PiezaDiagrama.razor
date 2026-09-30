@@ -1,0 +1,24 @@
+@* Vista simplificada de la pieza a escala, no un plano técnico: sirve para que el
+   cliente entienda de un vistazo la forma y las medidas cargadas. La geometría vive
+   en PiezaSvgBuilder para que este mismo dibujo se pueda reusar en el PDF del
+   presupuesto sin duplicar la lógica. *@
+
+<div style="max-width:360px;background:var(--mud-palette-background-grey,#f5f5f5);border-radius:8px;padding:4px">
+    @((MarkupString)_svg)
+</div>
+
+@code {
+    [Parameter] public FormaPieza Forma { get; set; }
+    [Parameter] public List<decimal> Tramos { get; set; } = new();
+    [Parameter] public decimal Profundidad { get; set; }
+    [Parameter] public bool LlevaZocalo { get; set; }
+    [Parameter] public string? ColorHex { get; set; }
+    [Parameter] public IReadOnlyList<CaladoInfo>? Calados { get; set; }
+
+    private string _svg = string.Empty;
+
+    protected override void OnParametersSet()
+    {
+        _svg = PiezaSvgBuilder.Build(Forma, Tramos, Profundidad, LlevaZocalo, ColorHex, Calados);
+    }
+}

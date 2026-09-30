@@ -1,0 +1,95 @@
+@page "/caja"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using MarmolesOeste.Web.Components.Dialogs
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject IDialogService DialogService
+
+<PageTitle>Caja</PageTitle>
+
+<MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h4">Caja</MudText>
+    <MudStack Row="true" Spacing="2">
+        <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="() => OpenMovimientoAsync(TipoMovimientoCaja.Ingreso)">
+            Nuevo ingreso
+        </MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Error" StartIcon="@Icons.Material.Filled.Remove"
+                   OnClick="() => OpenMovimientoAsync(TipoMovimientoCaja.Egreso)">
+            Nuevo egreso
+        </MudButton>
+    </MudStack>
+</MudStack>
+
+<MudPaper Class="pa-4 mb-4">
+    <MudText Typo="Typo.body2">Saldo actual</MudText>
+    <MudText Typo="Typo.h4" Color="@(_saldo < 0 ? Color.Error : Color.Success)">@_saldo.ToString("C2")</MudText>
+</MudPaper>
+
+<MudPaper Class="pa-4">
+    <MudTable Items="_movimientos" Loading="_loading" Hover="true">
+        <HeaderContent>
+            <MudTh>Fecha</MudTh>
+            <MudTh>Tipo</MudTh>
+            <MudTh>Concepto</MudTh>
+            <MudTh>Medio de pago</MudTh>
+            <MudTh>Venta</MudTh>
+            <MudTh>Monto</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Fecha">@context.Fecha.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
+            <MudTd DataLabel="Tipo">
+                <MudText Color="@(context.Tipo == TipoMovimientoCaja.Ingreso ? Color.Success : Color.Error)">@context.Tipo</MudText>
+            </MudTd>
+            <MudTd DataLabel="Concepto">@context.Concepto</MudTd>
+            <MudTd DataLabel="Medio de pago">@context.MedioPago</MudTd>
+            <MudTd DataLabel="Venta">
+                @if (context.Venta is not null)
+                {
+                    <MudLink Href="@($"/ventas/{context.VentaId}")">Nº @context.Venta.Presupuesto.NumeroCorrelativo</MudLink>
+                }
+            </MudTd>
+            <MudTd DataLabel="Monto">
+                @(context.Tipo == TipoMovimientoCaja.Ingreso ? "+" : "-")@context.Monto.ToString("C2")
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText>No hay movimientos de caja todavía.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private List<MovimientoCaja> _movimientos = new();
+    private decimal _saldo;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        // Fecha se graba sola al registrar el movimiento (DateTime.UtcNow), no se
+        // elige a mano: así el orden refleja el momento real en que pasó cada cosa.
+        _movimientos = await db.MovimientosCaja
+            .Include(m => m.Venta).ThenInclude(v => v!.Presupuesto)
+            .OrderByDescending(m => m.Fecha)
+            .ThenByDescending(m => m.Id)
+            .ToListAsync();
+
+        _saldo = _movimientos.Sum(m => m.Tipo == TipoMovimientoCaja.Ingreso ? m.Monto : -m.Monto);
+        _loading = false;
+    }
+
+    private async Task OpenMovimientoAsync(TipoMovimientoCaja tipo)
+    {
+        var parameters = new DialogParameters<MovimientoCajaDialog> { { x => x.Tipo, tipo } };
+        var reference = await DialogService.ShowAsync<MovimientoCajaDialog>(null, parameters);
+        var result = await reference.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+}

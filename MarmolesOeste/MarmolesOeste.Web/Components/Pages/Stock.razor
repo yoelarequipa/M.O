@@ -1,0 +1,290 @@
+@page "/stock"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using MarmolesOeste.Web.Components.Dialogs
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject IDialogService DialogService
+
+<PageTitle>Stock</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Stock de placas</MudText>
+
+<MudPaper Class="pa-4 mb-4">
+    <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-2">
+        <div>
+            <MudText Typo="Typo.h6">Próxima llegada de camión</MudText>
+            @if (_proximaLlegada is null)
+            {
+                <MudText Typo="Typo.body2" Color="Color.Secondary">No hay ninguna programada.</MudText>
+            }
+            else
+            {
+                <MudText Typo="Typo.body1">@_proximaLlegada.FechaEstimada.ToString("dd/MM/yyyy") — @_proximaLlegada.Descripcion</MudText>
+            }
+        </div>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.LocalShipping" OnClick="OpenProgramarLlegadaAsync">
+            Programar llegada
+        </MudButton>
+    </MudStack>
+
+    @if (_proximasLlegadas.Count > 0)
+    {
+        <MudTable Items="_proximasLlegadas" Dense="true" Hover="true" Class="mt-2">
+            <HeaderContent>
+                <MudTh>Fecha estimada</MudTh>
+                <MudTh>Descripción</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Fecha estimada">@context.FechaEstimada.ToString("dd/MM/yyyy")</MudTd>
+                <MudTd DataLabel="Descripción">@context.Descripcion</MudTd>
+                <MudTd>
+                    <MudButton Size="Size.Small" Color="Color.Success" OnClick="() => MarcarRecibidoAsync(context)">Marcar recibido</MudButton>
+                    <MudButton Size="Size.Small" Color="Color.Error" OnClick="() => CancelarLlegadaAsync(context)">Cancelar</MudButton>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</MudPaper>
+
+<MudPaper Class="pa-4 mb-4">
+    <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-2">
+        <MudText Typo="Typo.h6">Stock actual por material</MudText>
+        @if (_ultimoMovimientoManual is not null)
+        {
+            <MudPaper Class="pa-2 px-3" Outlined="true">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Última actualización manual</MudText>
+                <MudText Typo="Typo.body2">
+                    @_ultimoMovimientoManual.Fecha.ToLocalTime().ToString("dd/MM/yyyy")
+                    — @_ultimoMovimientoManual.Material.Nombre: @_ultimoMovimientoManual.Motivo
+                </MudText>
+            </MudPaper>
+        }
+    </MudStack>
+    <MudTable Items="_resumen" Loading="_loading" Hover="true">
+        <HeaderContent>
+            <MudTh>Material</MudTh>
+            <MudTh>Tipo</MudTh>
+            <MudTh>Stock disponible</MudTh>
+            <MudTh>Alerta de stock</MudTh>
+            <MudTh></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Material">@context.Material.Nombre</MudTd>
+            <MudTd DataLabel="Tipo">@context.Material.Tipo</MudTd>
+            <MudTd DataLabel="Stock disponible">
+                <MudText Color="@(EnAlerta(context) ? Color.Warning : context.Stock <= 0 ? Color.Error : Color.Default)">
+                    @context.Stock.ToString("N2") m²
+                </MudText>
+            </MudTd>
+            <MudTd DataLabel="Alerta de stock">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                    <MudTooltip Text="@(context.Material.AlertaStockActiva ? "Alerta activada: tocá para desactivar" : "Alerta desactivada: tocá para activar")">
+                        <MudIconButton Icon="@(context.Material.AlertaStockActiva ? Icons.Material.Filled.NotificationsActive : Icons.Material.Filled.NotificationsOff)"
+                                       Color="@(context.Material.AlertaStockActiva ? Color.Warning : Color.Default)"
+                                       Size="Size.Small"
+                                       OnClick="() => ToggleAlertaAsync(context.Material)" />
+                    </MudTooltip>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">
+                        @(context.Material.AlertaStockCantidad is null ? "Sin configurar" : $"Mínimo: {context.Material.AlertaStockCantidad:N2} m²")
+                    </MudText>
+                </MudStack>
+            </MudTd>
+            <MudTd>
+                <MudButton Size="Size.Small" Color="Color.Success" StartIcon="@Icons.Material.Filled.Add"
+                           OnClick="() => OpenMovimientoAsync(context.Material, TipoMovimientoStock.Entrada)">
+                    Entrada
+                </MudButton>
+                <MudButton Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Filled.Remove"
+                           OnClick="() => OpenMovimientoAsync(context.Material, TipoMovimientoStock.Salida)">
+                    Salida
+                </MudButton>
+                <MudButton Size="Size.Small" Color="Color.Default" StartIcon="@Icons.Material.Filled.NotificationsActive"
+                           OnClick="() => OpenAlertaAsync(context.Material)">
+                    Alerta
+                </MudButton>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText>No hay materiales activos cargados.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+<MudPaper Class="pa-4">
+    <MudText Typo="Typo.h6" Class="mb-2">Movimientos recientes</MudText>
+    <MudTable Items="_movimientos" Hover="true">
+        <HeaderContent>
+            <MudTh>Fecha</MudTh>
+            <MudTh>Material</MudTh>
+            <MudTh>Tipo</MudTh>
+            <MudTh>Cantidad</MudTh>
+            <MudTh>Motivo</MudTh>
+            <MudTh>Origen</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Fecha">@context.Fecha.ToLocalTime().ToString("dd/MM/yyyy")</MudTd>
+            <MudTd DataLabel="Material">@context.Material.Nombre</MudTd>
+            <MudTd DataLabel="Tipo">@context.Tipo</MudTd>
+            <MudTd DataLabel="Cantidad">@context.Cantidad.ToString("N2") m²</MudTd>
+            <MudTd DataLabel="Motivo">@context.Motivo</MudTd>
+            <MudTd DataLabel="Origen">@Origen(context)</MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText>Todavía no hay movimientos registrados.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private List<ResumenMaterial> _resumen = new();
+    private List<MovimientoStock> _movimientos = new();
+    private MovimientoStock? _ultimoMovimientoManual;
+    private List<LlegadaStock> _proximasLlegadas = new();
+    private LlegadaStock? _proximaLlegada;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        _proximasLlegadas = await db.LlegadasStock
+            .Where(l => !l.Recibido)
+            .OrderBy(l => l.FechaEstimada)
+            .ToListAsync();
+        _proximaLlegada = _proximasLlegadas.FirstOrDefault();
+
+        var materiales = await db.Materiales.OrderBy(m => m.Nombre).ToListAsync();
+
+        var stockPorMaterial = await db.MovimientosStock
+            .GroupBy(m => m.MaterialId)
+            .Select(g => new
+            {
+                MaterialId = g.Key,
+                Stock = g.Sum(m => m.Tipo == TipoMovimientoStock.Entrada ? m.Cantidad : -m.Cantidad),
+            })
+            .ToDictionaryAsync(x => x.MaterialId, x => x.Stock);
+
+        _resumen = materiales
+            .Select(m => new ResumenMaterial(m, stockPorMaterial.GetValueOrDefault(m.Id)))
+            .ToList();
+
+        _movimientos = await db.MovimientosStock
+            .Include(m => m.Material)
+            .OrderByDescending(m => m.Fecha)
+            .Take(50)
+            .ToListAsync();
+
+        // Solo movimientos cargados a mano (sin TipoDocumentoOrigen): el consumo
+        // automático por venta no cuenta como "actualización" de stock para esto.
+        _ultimoMovimientoManual = await db.MovimientosStock
+            .Include(m => m.Material)
+            .Where(m => m.TipoDocumentoOrigen == null)
+            .OrderByDescending(m => m.Fecha)
+            .FirstOrDefaultAsync();
+
+        _loading = false;
+    }
+
+    private static string Origen(MovimientoStock movimiento) => movimiento.TipoDocumentoOrigen switch
+    {
+        TipoDocumentoOrigenStock.Venta => $"Venta #{movimiento.DocumentoOrigenId}",
+        TipoDocumentoOrigenStock.Compra => "Compra",
+        TipoDocumentoOrigenStock.AjusteManual => "Ajuste manual",
+        _ => "Manual",
+    };
+
+    private static bool EnAlerta(ResumenMaterial resumen) =>
+        resumen.Material.AlertaStockActiva
+        && resumen.Material.AlertaStockCantidad is not null
+        && resumen.Stock <= resumen.Material.AlertaStockCantidad;
+
+    private async Task ToggleAlertaAsync(Material material)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entidad = await db.Materiales.FindAsync(material.Id);
+        if (entidad is null)
+        {
+            return;
+        }
+
+        entidad.AlertaStockActiva = !entidad.AlertaStockActiva;
+        await db.SaveChangesAsync();
+        await LoadAsync();
+    }
+
+    private async Task OpenAlertaAsync(Material material)
+    {
+        var parameters = new DialogParameters<AlertaStockDialog>
+        {
+            { x => x.MaterialId, material.Id },
+            { x => x.NombreMaterial, material.Nombre },
+            { x => x.CantidadActual, material.AlertaStockCantidad },
+        };
+        var reference = await DialogService.ShowAsync<AlertaStockDialog>(null, parameters);
+        var result = await reference.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task OpenMovimientoAsync(Material material, TipoMovimientoStock tipo)
+    {
+        var parameters = new DialogParameters<MovimientoStockDialog>
+        {
+            { x => x.MaterialId, material.Id },
+            { x => x.NombreMaterial, material.Nombre },
+            { x => x.Tipo, tipo },
+        };
+        var reference = await DialogService.ShowAsync<MovimientoStockDialog>(null, parameters);
+        var result = await reference.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task OpenProgramarLlegadaAsync()
+    {
+        var reference = await DialogService.ShowAsync<LlegadaStockDialog>("Programar llegada de camión");
+        var result = await reference.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task MarcarRecibidoAsync(LlegadaStock llegada)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entidad = await db.LlegadasStock.FindAsync(llegada.Id);
+        if (entidad is null)
+        {
+            return;
+        }
+
+        entidad.Recibido = true;
+        await db.SaveChangesAsync();
+        await LoadAsync();
+    }
+
+    private async Task CancelarLlegadaAsync(LlegadaStock llegada)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entidad = await db.LlegadasStock.FindAsync(llegada.Id);
+        if (entidad is null)
+        {
+            return;
+        }
+
+        db.LlegadasStock.Remove(entidad);
+        await db.SaveChangesAsync();
+        await LoadAsync();
+    }
+
+    private sealed record ResumenMaterial(Material Material, decimal Stock);
+}

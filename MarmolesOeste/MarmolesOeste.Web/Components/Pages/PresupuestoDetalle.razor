@@ -1,0 +1,364 @@
+@page "/presupuestos/{Id:int}"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using MarmolesOeste.Web.Components.Dialogs
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject NavigationManager NavigationManager
+
+<PageTitle>Presupuesto</PageTitle>
+
+@if (_presupuesto is null)
+{
+    <MudText>Cargando...</MudText>
+}
+else
+{
+    <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-4">
+        <div>
+            <MudText Typo="Typo.h4">Presupuesto Nº @_presupuesto.NumeroCorrelativo</MudText>
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudText Typo="Typo.body2">
+                    @(_presupuesto.Cliente?.Nombre ?? _presupuesto.NombreReferencia ?? "Sin datos de cliente") · @_presupuesto.Fecha.ToLocalTime().ToString("dd/MM/yyyy")
+                </MudText>
+                @if (_presupuesto.Cliente is null)
+                {
+                    <MudLink Typo="Typo.body2" OnClick="OpenAsignarClienteAsync">(asignar cliente)</MudLink>
+                }
+            </MudStack>
+        </div>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PictureAsPdf"
+                       Href="@($"/api/presupuestos/{Id}/pdf")" Target="_blank">
+                Descargar PDF
+            </MudButton>
+            <MudChip T="string" Color="EstadoColor()">@_presupuesto.Estado</MudChip>
+            @if (_presupuesto.Estado == EstadoPresupuesto.Borrador)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="() => CambiarEstadoAsync(EstadoPresupuesto.Enviado)">Enviar</MudButton>
+            }
+            @if (_presupuesto.Estado == EstadoPresupuesto.Enviado)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="() => CambiarEstadoAsync(EstadoPresupuesto.Aceptado)">Marcar aceptado</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="() => CambiarEstadoAsync(EstadoPresupuesto.Rechazado)">Rechazar</MudButton>
+            }
+            @if (_presupuesto.Estado == EstadoPresupuesto.Aceptado)
+            {
+                @if (_presupuesto.Venta is null)
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="OpenGenerarVentaAsync">Generar venta</MudButton>
+                }
+                else
+                {
+                    <MudButton Variant="Variant.Outlined" Href="@($"/ventas/{_presupuesto.Venta.Id}")">Ver venta</MudButton>
+                }
+            }
+        </MudStack>
+    </MudStack>
+
+    <MudPaper Class="pa-4 mb-4">
+        <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-2">
+            <MudText Typo="Typo.h6">Piezas</MudText>
+            @if (_editable)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreatePiezaAsync">
+                    Agregar pieza
+                </MudButton>
+            }
+        </MudStack>
+        <MudTable Items="_presupuesto.Piezas" Hover="true">
+            <HeaderContent>
+                <MudTh>Forma</MudTh>
+                <MudTh>Material</MudTh>
+                <MudTh>Terminación</MudTh>
+                <MudTh>Área</MudTh>
+                <MudTh>Zócalo</MudTh>
+                <MudTh>Subtotal</MudTh>
+                @if (_editable)
+                {
+                    <MudTh></MudTh>
+                }
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Forma">@context.Forma</MudTd>
+                <MudTd DataLabel="Material">@context.NombreMaterialCongelado</MudTd>
+                <MudTd DataLabel="Terminación">@context.NombreTerminacionCongelado</MudTd>
+                <MudTd DataLabel="Área">@PresupuestoCalculos.AreaM2(context).ToString("N2") m²</MudTd>
+                <MudTd DataLabel="Zócalo">@(context.LlevaZocalo ? "Sí" : "No")</MudTd>
+                <MudTd DataLabel="Subtotal">@PresupuestoCalculos.SubtotalPieza(context).ToString("C2")</MudTd>
+                @if (_editable)
+                {
+                    <MudTd>
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => OpenEditPiezaAsync(context)" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => EliminarPiezaAsync(context)" />
+                    </MudTd>
+                }
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText>No hay piezas cargadas.</MudText>
+            </NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+
+    <MudPaper Class="pa-4 mb-4">
+        <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-2">
+            <MudText Typo="Typo.h6">Adicionales</MudText>
+            @if (_editable)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreateAdicionalAsync">
+                    Agregar adicional
+                </MudButton>
+            }
+        </MudStack>
+        <MudTable Items="_presupuesto.Adicionales" Hover="true">
+            <HeaderContent>
+                <MudTh>Nombre</MudTh>
+                <MudTh>Cantidad</MudTh>
+                <MudTh>Precio unitario</MudTh>
+                <MudTh>Subtotal</MudTh>
+                @if (_editable)
+                {
+                    <MudTh></MudTh>
+                }
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Nombre">@context.NombreAdicionalCongelado</MudTd>
+                <MudTd DataLabel="Cantidad">@context.Cantidad.ToString("N2")</MudTd>
+                <MudTd DataLabel="Precio unitario">@context.PrecioAdicionalCongelado.ToString("C2")</MudTd>
+                <MudTd DataLabel="Subtotal">@PresupuestoCalculos.SubtotalAdicional(context).ToString("C2")</MudTd>
+                @if (_editable)
+                {
+                    <MudTd>
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => EliminarAdicionalAsync(context)" />
+                    </MudTd>
+                }
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText>No hay adicionales cargados.</MudText>
+            </NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+
+    <MudPaper Class="pa-4">
+        <MudText Typo="Typo.h6" Class="mb-2">Totales</MudText>
+        <MudGrid>
+            <MudItem xs="12" sm="6">
+                <MudNumericField T="decimal" Value="_presupuesto.DescuentoPorcentaje" Label="Descuento (%)" Min="0m" Max="100m" Format="N2"
+                                 Disabled="!_editable" ValueChanged="OnDescuentoChanged" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudNumericField T="decimal" Value="_presupuesto.IvaPorcentaje" Label="IVA (%)" Min="0m" Max="100m" Format="N2"
+                                 Disabled="!_editable" ValueChanged="OnIvaChanged" />
+            </MudItem>
+        </MudGrid>
+        <MudSimpleTable Class="mt-4" Dense="true">
+            <tbody>
+                <tr><td>Subtotal</td><td class="text-right">@_presupuesto.Subtotal.ToString("C2")</td></tr>
+                <tr><td>Descuento</td><td class="text-right">-@_presupuesto.Descuento.ToString("C2")</td></tr>
+                <tr><td>IVA</td><td class="text-right">@_presupuesto.Iva.ToString("C2")</td></tr>
+                <tr><td><strong>Total</strong></td><td class="text-right"><strong>@_presupuesto.Total.ToString("C2")</strong></td></tr>
+            </tbody>
+        </MudSimpleTable>
+    </MudPaper>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private Presupuesto? _presupuesto;
+    private bool _editable => _presupuesto is { Estado: EstadoPresupuesto.Borrador or EstadoPresupuesto.Enviado };
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _presupuesto = await db.Presupuestos
+            .Include(p => p.Cliente)
+            .Include(p => p.Piezas).ThenInclude(pz => pz.Tramos)
+            .Include(p => p.Adicionales)
+            .Include(p => p.Venta)
+            .FirstOrDefaultAsync(p => p.Id == Id);
+
+        if (_presupuesto is null)
+        {
+            NavigationManager.NavigateTo("/presupuestos");
+        }
+    }
+
+    private Color EstadoColor() => _presupuesto!.Estado switch
+    {
+        EstadoPresupuesto.Borrador => Color.Default,
+        EstadoPresupuesto.Enviado => Color.Info,
+        EstadoPresupuesto.Aceptado => Color.Success,
+        EstadoPresupuesto.Rechazado => Color.Error,
+        EstadoPresupuesto.Vencido => Color.Warning,
+        _ => Color.Default,
+    };
+
+    private async Task CambiarEstadoAsync(EstadoPresupuesto nuevoEstado)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var presupuesto = await db.Presupuestos.FindAsync(Id);
+        if (presupuesto is null)
+        {
+            return;
+        }
+
+        presupuesto.Estado = nuevoEstado;
+        await db.SaveChangesAsync();
+        Snackbar.Add($"Presupuesto marcado como {nuevoEstado}.", Severity.Success);
+        await LoadAsync();
+    }
+
+    private async Task OpenGenerarVentaAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var presupuesto = await db.Presupuestos.FindAsync(Id);
+        if (presupuesto is null || presupuesto.Estado != EstadoPresupuesto.Aceptado)
+        {
+            return;
+        }
+
+        if (presupuesto.ClienteId is null)
+        {
+            Snackbar.Add("Asigná un cliente antes de generar la venta.", Severity.Warning);
+            await OpenAsignarClienteAsync();
+            return;
+        }
+
+        var parameters = new DialogParameters<GenerarVentaDialog> { { x => x.PresupuestoId, Id } };
+        var reference = await DialogService.ShowAsync<GenerarVentaDialog>("Generar venta", parameters);
+        var result = await reference.Result;
+        if (result is { Canceled: false, Data: int nuevaVentaId })
+        {
+            Snackbar.Add("Venta generada.", Severity.Success);
+            NavigationManager.NavigateTo($"/ventas/{nuevaVentaId}");
+        }
+    }
+
+    private async Task OnDescuentoChanged(decimal valor)
+    {
+        _presupuesto!.DescuentoPorcentaje = valor;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var presupuesto = await db.Presupuestos.FindAsync(Id);
+        presupuesto!.DescuentoPorcentaje = valor;
+        await db.SaveChangesAsync();
+        await PresupuestoCalculos.RecalcularTotalesAsync(db, Id);
+        await LoadAsync();
+    }
+
+    private async Task OnIvaChanged(decimal valor)
+    {
+        _presupuesto!.IvaPorcentaje = valor;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var presupuesto = await db.Presupuestos.FindAsync(Id);
+        presupuesto!.IvaPorcentaje = valor;
+        await db.SaveChangesAsync();
+        await PresupuestoCalculos.RecalcularTotalesAsync(db, Id);
+        await LoadAsync();
+    }
+
+    private static readonly DialogOptions PiezaDialogOptions = new() { MaxWidth = MaxWidth.Medium, FullWidth = true };
+
+    private async Task OpenAsignarClienteAsync()
+    {
+        var parameters = new DialogParameters<AsignarClienteDialog> { { x => x.PresupuestoId, Id } };
+        var reference = await DialogService.ShowAsync<AsignarClienteDialog>("Asignar cliente", parameters);
+        var result = await reference.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task OpenCreatePiezaAsync()
+    {
+        var parameters = new DialogParameters<PresupuestoPiezaEditDialog> { { x => x.PresupuestoId, Id } };
+        var reference = await DialogService.ShowAsync<PresupuestoPiezaEditDialog>("Agregar pieza", parameters, PiezaDialogOptions);
+        var result = await reference.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task OpenEditPiezaAsync(PresupuestoPieza pieza)
+    {
+        var parameters = new DialogParameters<PresupuestoPiezaEditDialog>
+        {
+            { x => x.PresupuestoId, Id },
+            { x => x.PresupuestoPiezaId, pieza.Id },
+        };
+        var reference = await DialogService.ShowAsync<PresupuestoPiezaEditDialog>("Editar pieza", parameters, PiezaDialogOptions);
+        var result = await reference.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task EliminarPiezaAsync(PresupuestoPieza pieza)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { x => x.Title, "Eliminar pieza" },
+            { x => x.Message, "¿Eliminar esta pieza del presupuesto?" },
+            { x => x.ConfirmText, "Eliminar" },
+        };
+        var reference = await DialogService.ShowAsync<ConfirmDialog>(null, parameters);
+        var result = await reference.Result;
+        if (result is not { Canceled: false })
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.PresupuestoPiezas.FindAsync(pieza.Id);
+        if (entity is not null)
+        {
+            db.PresupuestoPiezas.Remove(entity);
+            await db.SaveChangesAsync();
+            await PresupuestoCalculos.RecalcularTotalesAsync(db, Id);
+            await LoadAsync();
+        }
+    }
+
+    private async Task OpenCreateAdicionalAsync()
+    {
+        var parameters = new DialogParameters<PresupuestoAdicionalEditDialog> { { x => x.PresupuestoId, Id } };
+        var reference = await DialogService.ShowAsync<PresupuestoAdicionalEditDialog>("Agregar adicional", parameters);
+        var result = await reference.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task EliminarAdicionalAsync(PresupuestoAdicional adicional)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { x => x.Title, "Eliminar adicional" },
+            { x => x.Message, $"¿Eliminar \"{adicional.NombreAdicionalCongelado}\" del presupuesto?" },
+            { x => x.ConfirmText, "Eliminar" },
+        };
+        var reference = await DialogService.ShowAsync<ConfirmDialog>(null, parameters);
+        var result = await reference.Result;
+        if (result is not { Canceled: false })
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.PresupuestoAdicionales.FindAsync(adicional.Id);
+        if (entity is not null)
+        {
+            db.PresupuestoAdicionales.Remove(entity);
+            await db.SaveChangesAsync();
+            await PresupuestoCalculos.RecalcularTotalesAsync(db, Id);
+            await LoadAsync();
+        }
+    }
+}

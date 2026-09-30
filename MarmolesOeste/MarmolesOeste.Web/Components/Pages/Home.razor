@@ -1,0 +1,416 @@
+@page "/"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<PageTitle>Inicio</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Mármoles Oeste</MudText>
+
+@if (_loading)
+{
+    <MudText>Cargando...</MudText>
+}
+else
+{
+    @if (_materialesEnAlerta.Count > 0)
+    {
+        <MudAlert Severity="Severity.Warning" Class="mb-4" Icon="@Icons.Material.Filled.NotificationsActive">
+            <MudText Typo="Typo.subtitle2" Class="mb-1">Alerta de stock</MudText>
+            @foreach (var m in _materialesEnAlerta)
+            {
+                <MudText Typo="Typo.body2">
+                    @m.Material.Nombre: quedan @m.Stock.ToString("N2") m² (mínimo configurado: @m.Material.AlertaStockCantidad!.Value.ToString("N2") m²)
+                </MudText>
+            }
+            <MudLink Href="/stock" Class="mt-1" Style="display:inline-block">Ir a Stock</MudLink>
+        </MudAlert>
+    }
+
+    <MudGrid Class="mb-6">
+        <MudItem xs="12" sm="6" md="4">
+            <MudPaper Class="pa-4" Style="cursor:pointer" @onclick="@(() => NavigationManager.NavigateTo("/presupuestos"))">
+                <MudText Typo="Typo.body2">Presupuestos por responder</MudText>
+                <MudText Typo="Typo.h4">@_presupuestosPendientes</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="4">
+            <MudPaper Class="pa-4" Style="cursor:pointer" @onclick="@(() => NavigationManager.NavigateTo("/produccion"))">
+                <MudText Typo="Typo.body2">Producción en curso</MudText>
+                <MudText Typo="Typo.h4">@_produccionEnCurso</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="4">
+            <MudPaper Class="pa-4" Style="cursor:pointer" @onclick="@(() => NavigationManager.NavigateTo("/entregas"))">
+                <MudText Typo="Typo.body2">Entregas esta semana</MudText>
+                <MudText Typo="Typo.h4">@_entregasEstaSemana</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="4">
+            <MudPaper Class="pa-4" Style="cursor:pointer" @onclick="@(() => NavigationManager.NavigateTo("/caja"))">
+                <MudText Typo="Typo.body2">Saldo de caja</MudText>
+                <MudText Typo="Typo.h4" Color="@(_saldoCaja < 0 ? Color.Error : Color.Default)">@_saldoCaja.ToString("C0")</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="4">
+            <MudPaper Class="pa-4" Style="cursor:pointer" @onclick="@(() => NavigationManager.NavigateTo("/stock"))">
+                <MudText Typo="Typo.body2">Próximo camión</MudText>
+                @if (_proximaLlegada is null)
+                {
+                    <MudText Typo="Typo.h6" Color="Color.Secondary">Sin programar</MudText>
+                }
+                else
+                {
+                    <MudText Typo="Typo.h4">@_proximaLlegada.FechaEstimada.ToString("dd/MM")</MudText>
+                }
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="4">
+            <MudPaper Class="pa-4" Style="cursor:pointer" @onclick="@(() => NavigationManager.NavigateTo("/facturacion"))">
+                <MudText Typo="Typo.body2">Facturado hoy</MudText>
+                <MudText Typo="Typo.h4">@_facturacionHoy.ToString("C0")</MudText>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <MudGrid>
+        <MudItem xs="12" md="6">
+            <MudPaper Class="pa-4">
+                <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-2">
+                    <MudText Typo="Typo.h6">Presupuestos por responder</MudText>
+                    <MudLink Href="/presupuestos">Ver todos</MudLink>
+                </MudStack>
+                @if (_presupuestosLista.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">No hay presupuestos esperando respuesta.</MudText>
+                }
+                else
+                {
+                    <MudSimpleTable Dense="true" Hover="true">
+                        <tbody>
+                            @foreach (var p in _presupuestosLista)
+                            {
+                                <tr style="cursor:pointer" @onclick="@(() => NavigationManager.NavigateTo($"/presupuestos/{p.Id}"))">
+                                    <td>Nº @p.NumeroCorrelativo — @(p.Cliente?.Nombre ?? p.NombreReferencia ?? "(sin datos)")</td>
+                                    <td>@p.Estado</td>
+                                    <td class="text-right">Vence @p.FechaVencimiento.ToLocalTime().ToString("dd/MM")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="6">
+            <MudPaper Class="pa-4">
+                <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-2">
+                    <MudText Typo="Typo.h6">Próximas entregas</MudText>
+                    <MudLink Href="/entregas">Ver todas</MudLink>
+                </MudStack>
+                @if (_entregasLista.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">No hay entregas programadas para los próximos días.</MudText>
+                }
+                else
+                {
+                    <MudSimpleTable Dense="true" Hover="true">
+                        <tbody>
+                            @foreach (var e in _entregasLista)
+                            {
+                                <tr style="cursor:pointer" @onclick="@(() => NavigationManager.NavigateTo($"/ventas/{e.VentaId}"))">
+                                    <td>@e.Venta.Presupuesto.Cliente!.Nombre</td>
+                                    <td>@e.Direccion</td>
+                                    <td class="text-right">@e.FechaProgramada.ToString("dd/MM")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <MudGrid Class="mt-1">
+        <MudItem xs="12" md="6">
+            <MudPaper Class="pa-4">
+                <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-2">
+                    <MudText Typo="Typo.h6">Últimas ventas</MudText>
+                    <MudLink Href="/ventas">Ver todas</MudLink>
+                </MudStack>
+                @if (_ultimasVentas.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Todavía no se generó ninguna venta.</MudText>
+                }
+                else
+                {
+                    <MudSimpleTable Dense="true" Hover="true">
+                        <tbody>
+                            @foreach (var v in _ultimasVentas)
+                            {
+                                <tr style="cursor:pointer" @onclick="@(() => NavigationManager.NavigateTo($"/ventas/{v.Id}"))">
+                                    <td>@v.Presupuesto.Cliente!.Nombre</td>
+                                    <td>@v.Fecha.ToLocalTime().ToString("dd/MM")</td>
+                                    <td class="text-right">@v.Total.ToString("C2")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <EntregasCalendario />
+        </MudItem>
+    </MudGrid>
+
+    <MudGrid Class="mt-1">
+        <MudItem xs="12">
+            <MudPaper Class="pa-4">
+                <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-2">
+                    <MudText Typo="Typo.h6">Tareas de hoy (@_tareasEnCursoHoy en curso, @_tareasCompletadasHoy/@_tareasHoy.Count completadas)</MudText>
+                    <MudLink Href="/tareas">Ver todas</MudLink>
+                </MudStack>
+                @if (_tareasHoy.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">No hay tareas cargadas para hoy.</MudText>
+                }
+                else
+                {
+                    <MudSimpleTable Dense="true" Hover="true">
+                        <tbody>
+                            @foreach (var t in _tareasHoy)
+                            {
+                                <tr style="cursor:pointer" @onclick="@(() => NavigationManager.NavigateTo("/tareas"))">
+                                    <td style="@(t.Estado == EstadoTarea.Completada ? "text-decoration:line-through" : t.Estado == EstadoTarea.EnCurso ? "font-weight:600" : "")">@t.Titulo</td>
+                                    <td>@(t.Empleado?.Nombre ?? "Sin asignar")</td>
+                                    <td class="text-right">@(t.Estado switch { EstadoTarea.EnCurso => "En curso", EstadoTarea.Completada => "Completada", _ => "Pendiente" })</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudPaper Class="pa-4">
+                <MudText Typo="Typo.h6" Class="mb-2">Última actividad</MudText>
+                @if (_actividadReciente.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Todavía no hay actividad registrada.</MudText>
+                }
+                else
+                {
+                    <MudStack Spacing="1">
+                        @foreach (var item in _actividadReciente)
+                        {
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3" Class="py-1">
+                                <MudIcon Icon="@item.Icono" Color="@item.Color" Size="Size.Small" />
+                                <MudText Typo="Typo.body2" Style="flex-grow:1">@item.Texto</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@item.Fecha.ToLocalTime().ToString("dd/MM HH:mm")</MudText>
+                            </MudStack>
+                        }
+                    </MudStack>
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    [Inject] private NavigationManager NavigationManager { get; set; } = null!;
+
+    private bool _loading = true;
+    private int _presupuestosPendientes;
+    private int _produccionEnCurso;
+    private int _entregasEstaSemana;
+    private decimal _saldoCaja;
+    private decimal _facturacionHoy;
+    private LlegadaStock? _proximaLlegada;
+    private List<Presupuesto> _presupuestosLista = new();
+    private List<Entrega> _entregasLista = new();
+    private List<Venta> _ultimasVentas = new();
+    private List<Tarea> _tareasHoy = new();
+    private int _tareasCompletadasHoy;
+    private int _tareasEnCursoHoy;
+    private List<MaterialEnAlerta> _materialesEnAlerta = new();
+    private List<ActividadItem> _actividadReciente = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var estadosAbiertos = new[] { EstadoPresupuesto.Borrador, EstadoPresupuesto.Enviado };
+        _presupuestosLista = await db.Presupuestos
+            .Include(p => p.Cliente)
+            .Where(p => estadosAbiertos.Contains(p.Estado))
+            .OrderBy(p => p.FechaVencimiento)
+            .Take(5)
+            .ToListAsync();
+        _presupuestosPendientes = await db.Presupuestos.CountAsync(p => estadosAbiertos.Contains(p.Estado));
+
+        var estadosProduccionAbiertos = new[] { EstadoOrdenProduccion.Pendiente, EstadoOrdenProduccion.EnProceso };
+        _produccionEnCurso = await db.OrdenesProduccion.CountAsync(o => estadosProduccionAbiertos.Contains(o.Estado));
+
+        var hoy = DateTime.UtcNow.Date;
+        var enUnaSemana = hoy.AddDays(7);
+        var estadosEntregaAbiertos = new[] { EstadoEntrega.Programada, EstadoEntrega.EnCamino };
+        _entregasLista = await db.Entregas
+            .Include(e => e.Venta).ThenInclude(v => v.Presupuesto).ThenInclude(p => p.Cliente)
+            .Where(e => estadosEntregaAbiertos.Contains(e.Estado) && e.FechaProgramada >= hoy && e.FechaProgramada <= enUnaSemana)
+            .OrderBy(e => e.FechaProgramada)
+            .Take(5)
+            .ToListAsync();
+        _entregasEstaSemana = await db.Entregas
+            .CountAsync(e => estadosEntregaAbiertos.Contains(e.Estado) && e.FechaProgramada >= hoy && e.FechaProgramada <= enUnaSemana);
+
+        _saldoCaja = await db.MovimientosCaja
+            .SumAsync(m => m.Tipo == TipoMovimientoCaja.Ingreso ? m.Monto : -m.Monto);
+
+        _proximaLlegada = await db.LlegadasStock
+            .Where(l => !l.Recibido)
+            .OrderBy(l => l.FechaEstimada)
+            .FirstOrDefaultAsync();
+
+        _ultimasVentas = await db.Ventas
+            .Include(v => v.Presupuesto).ThenInclude(p => p.Cliente)
+            .OrderByDescending(v => v.Fecha)
+            .Take(3)
+            .ToListAsync();
+
+        // Mismo cálculo que en Facturación: límite de "hoy" en hora local (Argentina),
+        // convertido a UTC para comparar contra Venta.Fecha.
+        var hoyInicioUtc = DateTime.SpecifyKind(DateTime.Today, DateTimeKind.Local).ToUniversalTime();
+        _facturacionHoy = await db.Ventas
+            .Where(v => v.Fecha >= hoyInicioUtc)
+            .SumAsync(v => v.Total);
+
+        _tareasHoy = await db.Tareas
+            .Include(t => t.Empleado)
+            .Where(t => t.Fecha.Date == hoy)
+            .ToListAsync();
+        _tareasHoy = _tareasHoy
+            .OrderBy(t => t.Estado == EstadoTarea.EnCurso ? 0 : t.Estado == EstadoTarea.Pendiente ? 1 : 2)
+            .ThenBy(t => t.Titulo)
+            .ToList();
+        _tareasCompletadasHoy = _tareasHoy.Count(t => t.Estado == EstadoTarea.Completada);
+        _tareasEnCursoHoy = _tareasHoy.Count(t => t.Estado == EstadoTarea.EnCurso);
+
+        var materialesConAlerta = await db.Materiales
+            .Where(m => m.AlertaStockActiva && m.AlertaStockCantidad != null)
+            .ToListAsync();
+        if (materialesConAlerta.Count > 0)
+        {
+            var stockPorMaterial = await db.MovimientosStock
+                .Where(mov => materialesConAlerta.Select(m => m.Id).Contains(mov.MaterialId))
+                .GroupBy(mov => mov.MaterialId)
+                .Select(g => new
+                {
+                    MaterialId = g.Key,
+                    Stock = g.Sum(mov => mov.Tipo == TipoMovimientoStock.Entrada ? mov.Cantidad : -mov.Cantidad),
+                })
+                .ToDictionaryAsync(x => x.MaterialId, x => x.Stock);
+
+            _materialesEnAlerta = materialesConAlerta
+                .Select(m => new MaterialEnAlerta(m, stockPorMaterial.GetValueOrDefault(m.Id)))
+                .Where(x => x.Stock <= x.Material.AlertaStockCantidad)
+                .OrderBy(x => x.Stock)
+                .ToList();
+        }
+
+        _actividadReciente = await CargarActividadRecienteAsync(db);
+
+        _loading = false;
+    }
+
+    // Arma un feed unificado de "lo último que pasó" combinando el evento más
+    // reciente de cada módulo (no hay una tabla de auditoría genérica: cada tipo de
+    // evento se arma reutilizando el campo de fecha que ya tiene su entidad).
+    private static async Task<List<ActividadItem>> CargarActividadRecienteAsync(ApplicationDbContext db)
+    {
+        var items = new List<ActividadItem>();
+
+        var ventas = await db.Ventas
+            .Include(v => v.Presupuesto).ThenInclude(p => p.Cliente)
+            .OrderByDescending(v => v.Fecha)
+            .Take(5)
+            .ToListAsync();
+        items.AddRange(ventas.Select(v => new ActividadItem(
+            v.Fecha,
+            Icons.Material.Filled.PointOfSale,
+            Color.Success,
+            $"Venta generada a {v.Presupuesto.Cliente?.Nombre ?? v.Presupuesto.NombreReferencia ?? "(sin datos)"} — {v.Total:C2}")));
+
+        var presupuestos = await db.Presupuestos
+            .Include(p => p.Cliente)
+            .OrderByDescending(p => p.Fecha)
+            .Take(5)
+            .ToListAsync();
+        items.AddRange(presupuestos.Select(p => new ActividadItem(
+            p.Fecha,
+            Icons.Material.Filled.Description,
+            Color.Primary,
+            $"Presupuesto Nº{p.NumeroCorrelativo} creado para {p.Cliente?.Nombre ?? p.NombreReferencia ?? "(sin datos)"}")));
+
+        var tareasCreadas = await db.Tareas
+            .Include(t => t.Empleado)
+            .OrderByDescending(t => t.FechaCreacion)
+            .Take(5)
+            .ToListAsync();
+        items.AddRange(tareasCreadas.Select(t => new ActividadItem(
+            t.FechaCreacion,
+            Icons.Material.Filled.Checklist,
+            Color.Info,
+            $"Tarea \"{t.Titulo}\" asignada a {t.Empleado?.Nombre ?? "sin asignar"}")));
+
+        var tareasCompletadas = await db.Tareas
+            .Where(t => t.FechaCompletada != null)
+            .OrderByDescending(t => t.FechaCompletada)
+            .Take(5)
+            .ToListAsync();
+        items.AddRange(tareasCompletadas.Select(t => new ActividadItem(
+            t.FechaCompletada!.Value,
+            Icons.Material.Filled.TaskAlt,
+            Color.Success,
+            $"Tarea \"{t.Titulo}\" completada")));
+
+        var movimientosStock = await db.MovimientosStock
+            .Include(m => m.Material)
+            .OrderByDescending(m => m.Fecha)
+            .Take(5)
+            .ToListAsync();
+        items.AddRange(movimientosStock.Select(m => new ActividadItem(
+            m.Fecha,
+            Icons.Material.Filled.Inventory,
+            m.Tipo == TipoMovimientoStock.Entrada ? Color.Success : Color.Warning,
+            $"{(m.Tipo == TipoMovimientoStock.Entrada ? "Entrada" : "Salida")} de stock: {m.Cantidad:N2} m² de {m.Material.Nombre}")));
+
+        var movimientosCaja = await db.MovimientosCaja
+            .OrderByDescending(m => m.Fecha)
+            .Take(5)
+            .ToListAsync();
+        items.AddRange(movimientosCaja.Select(m => new ActividadItem(
+            m.Fecha,
+            Icons.Material.Filled.AttachMoney,
+            m.Tipo == TipoMovimientoCaja.Ingreso ? Color.Success : Color.Warning,
+            $"{(m.Tipo == TipoMovimientoCaja.Ingreso ? "Ingreso" : "Egreso")} de caja: {m.Concepto} — {m.Monto:C2}")));
+
+        var entregasRealizadas = await db.Entregas
+            .Include(e => e.Venta).ThenInclude(v => v.Presupuesto).ThenInclude(p => p.Cliente)
+            .Where(e => e.FechaEntregada != null)
+            .OrderByDescending(e => e.FechaEntregada)
+            .Take(5)
+            .ToListAsync();
+        items.AddRange(entregasRealizadas.Select(e => new ActividadItem(
+            e.FechaEntregada!.Value,
+            Icons.Material.Filled.LocalShipping,
+            Color.Success,
+            $"Entrega realizada a {e.Venta.Presupuesto.Cliente?.Nombre ?? "(sin datos)"}")));
+
+        return items.OrderByDescending(i => i.Fecha).Take(10).ToList();
+    }
+
+    private sealed record MaterialEnAlerta(Material Material, decimal Stock);
+
+    private sealed record ActividadItem(DateTime Fecha, string Icono, Color Color, string Texto);
+}

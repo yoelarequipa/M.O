@@ -1,0 +1,13 @@
+@rendermode InteractiveServer
+
+@* Vive fuera de <Routes> en App.razor, como una isla interactiva propia e
+   independiente de qué página se esté mostrando. Así el mecanismo de routing
+   interactivo nunca se entera de que existe, y las páginas de Identity
+   (que necesitan quedar completamente estáticas) no se ven afectadas. Los
+   diálogos siguen funcionando porque IDialogService es un servicio compartido
+   dentro del mismo circuito, sin importar en qué "isla" interactiva se llame. *@
+
+<MudThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />

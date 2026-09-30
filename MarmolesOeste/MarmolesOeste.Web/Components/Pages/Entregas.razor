@@ -1,0 +1,136 @@
+@page "/entregas"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ISnackbar Snackbar
+
+<PageTitle>Entregas</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Entregas</MudText>
+
+<MudTable Items="_entregas" Loading="_loading" Hover="true">
+    <HeaderContent>
+        <MudTh>Cliente</MudTh>
+        <MudTh>Presupuesto</MudTh>
+        <MudTh>Fecha programada</MudTh>
+        <MudTh>Dirección</MudTh>
+        <MudTh>Estado</MudTh>
+        <MudTh>Pago</MudTh>
+        <MudTh></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Cliente">
+            <MudLink Href="@($"/ventas/{context.VentaId}")">@context.Venta.Presupuesto.Cliente!.Nombre</MudLink>
+        </MudTd>
+        <MudTd DataLabel="Presupuesto">
+            <MudLink Href="@($"/presupuestos/{context.Venta.PresupuestoId}")">Nº @context.Venta.Presupuesto.NumeroCorrelativo</MudLink>
+        </MudTd>
+        <MudTd DataLabel="Fecha programada">@context.FechaProgramada.ToString("dd/MM/yyyy")</MudTd>
+        <MudTd DataLabel="Dirección">@context.Direccion</MudTd>
+        <MudTd DataLabel="Estado">@context.Estado</MudTd>
+        <MudTd DataLabel="Pago">
+            <MudChip T="string" Size="Size.Small" Color="@EstadoPagoColor(context)">@EstadoPagoTexto(context)</MudChip>
+        </MudTd>
+        <MudTd>
+            @if (context.Estado == EstadoEntrega.Programada)
+            {
+                @if (context.Venta.OrdenProduccion?.Estado == EstadoOrdenProduccion.Terminada)
+                {
+                    <MudButton Size="Size.Small" OnClick="() => CambiarEstadoAsync(context, EstadoEntrega.EnCamino)">En camino</MudButton>
+                }
+                else
+                {
+                    <MudText Typo="Typo.caption" Class="mr-2">Esperando fin de producción</MudText>
+                }
+                <MudButton Size="Size.Small" Color="Color.Error" OnClick="() => CambiarEstadoAsync(context, EstadoEntrega.Cancelada)">Cancelar</MudButton>
+            }
+            @if (context.Estado == EstadoEntrega.EnCamino)
+            {
+                <MudButton Size="Size.Small" Color="Color.Success" OnClick="() => CambiarEstadoAsync(context, EstadoEntrega.Entregada)">Entregada</MudButton>
+            }
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText>No hay entregas programadas todavía.</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@code {
+    private List<Entrega> _entregas = new();
+    private Dictionary<int, decimal> _pagado = new();
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var todas = await db.Entregas
+            .Include(e => e.Venta).ThenInclude(v => v.Presupuesto).ThenInclude(p => p.Cliente)
+            .Include(e => e.Venta).ThenInclude(v => v.OrdenProduccion)
+            .ToListAsync();
+
+        // Arriba, lo que todavía falta entregar (lo más urgente primero, por fecha
+        // programada). Debajo, lo ya resuelto (entregado o cancelado), pero ordenado
+        // por el momento real en que se marcó como entregada, no por cuándo se había
+        // programado — así lo último que se entregó queda arriba de ese grupo.
+        var pendientes = todas
+            .Where(e => e.Estado is EstadoEntrega.Programada or EstadoEntrega.EnCamino)
+            .OrderBy(e => e.FechaProgramada);
+        var resueltas = todas
+            .Where(e => e.Estado is EstadoEntrega.Entregada or EstadoEntrega.Cancelada)
+            .OrderByDescending(e => e.FechaEntregada ?? e.FechaProgramada);
+        _entregas = pendientes.Concat(resueltas).ToList();
+        _pagado = await VentaCalculos.MontoPagadoPorVentaAsync(db);
+        _loading = false;
+    }
+
+    private decimal Pagado(Entrega entrega) => _pagado.GetValueOrDefault(entrega.VentaId);
+
+    private string EstadoPagoTexto(Entrega entrega)
+    {
+        var pagado = Pagado(entrega);
+        if (pagado <= 0) return "Sin pago";
+        if (pagado < entrega.Venta.Total) return $"Seña {pagado.ToString("C0")}";
+        return "Pagado";
+    }
+
+    private Color EstadoPagoColor(Entrega entrega)
+    {
+        var pagado = Pagado(entrega);
+        if (pagado <= 0) return Color.Error;
+        if (pagado < entrega.Venta.Total) return Color.Warning;
+        return Color.Success;
+    }
+
+    private async Task CambiarEstadoAsync(Entrega entrega, EstadoEntrega nuevoEstado)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        if (nuevoEstado == EstadoEntrega.EnCamino)
+        {
+            var orden = await db.OrdenesProduccion.FirstOrDefaultAsync(o => o.VentaId == entrega.VentaId);
+            if (orden?.Estado != EstadoOrdenProduccion.Terminada)
+            {
+                Snackbar.Add("No se puede despachar: la producción todavía no terminó.", Severity.Warning);
+                return;
+            }
+        }
+
+        var entidad = await db.Entregas.FindAsync(entrega.Id);
+        if (entidad is null)
+        {
+            return;
+        }
+
+        entidad.Estado = nuevoEstado;
+        if (nuevoEstado == EstadoEntrega.Entregada)
+        {
+            entidad.FechaEntregada = DateTime.UtcNow;
+        }
+        await db.SaveChangesAsync();
+        Snackbar.Add($"Entrega marcada como {nuevoEstado}.", Severity.Success);
+        await LoadAsync();
+    }
+}

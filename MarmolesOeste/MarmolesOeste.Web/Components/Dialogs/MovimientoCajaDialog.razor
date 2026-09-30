@@ -1,0 +1,92 @@
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<MudDialog>
+    <TitleContent>@(Tipo == TipoMovimientoCaja.Ingreso ? "Nuevo ingreso" : "Nuevo egreso")</TitleContent>
+    <DialogContent>
+        <MudForm @ref="_form">
+            <MudTextField @bind-Value="_concepto" Label="Concepto" Required="true" RequiredError="El concepto es obligatorio" Class="mb-2" />
+            <MudNumericField @bind-Value="_monto" Label="Monto" Required="true" Min="0.01m" Format="N2" Adornment="Adornment.Start" AdornmentText="$" Class="mb-2" />
+            <MudSelect T="MedioPago" @bind-Value="_medioPago" Label="Medio de pago" Required="true" Class="mb-2">
+                @foreach (var medio in Enum.GetValues<MedioPago>())
+                {
+                    <MudSelectItem T="MedioPago" Value="@medio">@medio</MudSelectItem>
+                }
+            </MudSelect>
+            @if (VentaIdFijo is null)
+            {
+                <MudSelect T="int?" @bind-Value="_ventaId" Label="Venta relacionada (opcional)" Clearable="true">
+                    @foreach (var venta in _ventas)
+                    {
+                        <MudSelectItem T="int?" Value="@venta.Id">Nº @venta.Presupuesto.NumeroCorrelativo — @venta.Presupuesto.Cliente!.Nombre</MudSelectItem>
+                    }
+                </MudSelect>
+            }
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancelar</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Guardar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public TipoMovimientoCaja Tipo { get; set; }
+    [Parameter] public int? VentaIdFijo { get; set; }
+    [Parameter] public string? ConceptoSugerido { get; set; }
+    [Parameter] public decimal? MontoSugerido { get; set; }
+
+    private MudForm _form = null!;
+    private List<Venta> _ventas = new();
+    private string _concepto = string.Empty;
+    private decimal _monto;
+    private MedioPago _medioPago = MedioPago.Efectivo;
+    private int? _ventaId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (VentaIdFijo is not null)
+        {
+            _ventaId = VentaIdFijo;
+        }
+        if (!string.IsNullOrWhiteSpace(ConceptoSugerido))
+        {
+            _concepto = ConceptoSugerido;
+        }
+        if (MontoSugerido is not null)
+        {
+            _monto = MontoSugerido.Value;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _ventas = await db.Ventas
+            .Include(v => v.Presupuesto).ThenInclude(p => p.Cliente)
+            .OrderByDescending(v => v.Fecha)
+            .ToListAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        await _form.ValidateAsync();
+        if (!_form.IsValid)
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        db.MovimientosCaja.Add(new MovimientoCaja
+        {
+            Tipo = Tipo,
+            Concepto = _concepto,
+            Monto = _monto,
+            MedioPago = _medioPago,
+            Fecha = DateTime.UtcNow,
+            VentaId = _ventaId,
+        });
+        await db.SaveChangesAsync();
+
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

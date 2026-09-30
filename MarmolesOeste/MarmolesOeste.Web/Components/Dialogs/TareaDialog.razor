@@ -1,0 +1,110 @@
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<MudDialog>
+    <TitleContent>@(TareaId == 0 ? "Nueva tarea" : "Editar tarea")</TitleContent>
+    <DialogContent>
+        <MudForm @ref="_form">
+            <MudTextField @bind-Value="_titulo" Label="Título" Required="true" RequiredError="El título es obligatorio" Class="mb-2" />
+            <MudTextField @bind-Value="_descripcion" Label="Descripción (opcional)" Lines="2" Class="mb-2" />
+            <MudDatePicker @bind-Date="_fecha" Label="Fecha" Required="true" Class="mb-2" />
+            <MudSelect T="int?" @bind-Value="_empleadoId" Label="Asignar a (opcional)" Clearable="true" Class="mb-2">
+                @foreach (var empleado in _empleados)
+                {
+                    <MudSelectItem T="int?" Value="@empleado.Id">@empleado.Nombre</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="int?" @bind-Value="_ventaId" Label="Venta relacionada (opcional)" Clearable="true">
+                @foreach (var venta in _ventas)
+                {
+                    <MudSelectItem T="int?" Value="@venta.Id">Nº @venta.Presupuesto.NumeroCorrelativo — @venta.Presupuesto.Cliente!.Nombre</MudSelectItem>
+                }
+            </MudSelect>
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancelar</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Guardar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public int TareaId { get; set; }
+    [Parameter] public DateTime? FechaSugerida { get; set; }
+
+    private MudForm _form = null!;
+    private List<Empleado> _empleados = new();
+    private List<Venta> _ventas = new();
+    private string _titulo = string.Empty;
+    private string? _descripcion;
+    private DateTime? _fecha;
+    private int? _empleadoId;
+    private int? _ventaId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _fecha = FechaSugerida ?? DateTime.UtcNow.Date;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _empleados = await db.Empleados.OrderBy(e => e.Nombre).ToListAsync();
+        _ventas = await db.Ventas
+            .Include(v => v.Presupuesto).ThenInclude(p => p.Cliente)
+            .OrderByDescending(v => v.Fecha)
+            .ToListAsync();
+
+        if (TareaId == 0)
+        {
+            return;
+        }
+
+        var existing = await db.Tareas.FindAsync(TareaId);
+        if (existing is not null)
+        {
+            _titulo = existing.Titulo;
+            _descripcion = existing.Descripcion;
+            _fecha = existing.Fecha;
+            _empleadoId = existing.EmpleadoId;
+            _ventaId = existing.VentaId;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        await _form.ValidateAsync();
+        if (!_form.IsValid || _fecha is null)
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        if (TareaId == 0)
+        {
+            db.Tareas.Add(new Tarea
+            {
+                Titulo = _titulo,
+                Descripcion = _descripcion,
+                Fecha = DateTime.SpecifyKind(_fecha.Value, DateTimeKind.Utc),
+                EmpleadoId = _empleadoId,
+                VentaId = _ventaId,
+                FechaCreacion = DateTime.UtcNow,
+            });
+        }
+        else
+        {
+            var existing = await db.Tareas.FindAsync(TareaId);
+            if (existing is not null)
+            {
+                existing.Titulo = _titulo;
+                existing.Descripcion = _descripcion;
+                existing.Fecha = DateTime.SpecifyKind(_fecha.Value, DateTimeKind.Utc);
+                existing.EmpleadoId = _empleadoId;
+                existing.VentaId = _ventaId;
+            }
+        }
+
+        await db.SaveChangesAsync();
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

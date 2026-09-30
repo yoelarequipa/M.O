@@ -1,0 +1,93 @@
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<MudDialog>
+    <TitleContent>@(TerminacionCantoId == 0 ? "Nueva terminación de canto" : "Editar terminación de canto")</TitleContent>
+    <DialogContent>
+        <MudForm @ref="_form" Model="_model">
+            <MudTextField @bind-Value="_model.Nombre" Label="Nombre" Required="true" RequiredError="El nombre es obligatorio" Class="mb-2" />
+            <MudNumericField @bind-Value="_model.PrecioPorMetroLineal" Label="Precio por metro lineal" Required="true" Min="0m" Format="N2" Adornment="Adornment.Start" AdornmentText="$" Class="mb-2" />
+
+            @if (TerminacionCantoId != 0)
+            {
+                @if (_model.FechaUltimaActualizacion is not null)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mb-2">
+                        Última actualización: @_model.FechaUltimaActualizacion.Value.ToLocalTime().ToString("dd/MM/yyyy") — @_model.MotivoUltimaActualizacion
+                    </MudText>
+                }
+                <MudTextField @bind-Value="_motivoCambio" Label="Motivo de este cambio" Required="true"
+                              RequiredError="Contá brevemente por qué cambiás esto" Lines="2" />
+            }
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancelar</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Guardar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public int TerminacionCantoId { get; set; }
+
+    private MudForm _form = null!;
+    private TerminacionCanto _model = new();
+    private string _motivoCambio = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (TerminacionCantoId == 0)
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var existing = await db.TerminacionesCanto.FindAsync(TerminacionCantoId);
+        if (existing is not null)
+        {
+            _model = new TerminacionCanto
+            {
+                Id = existing.Id,
+                Nombre = existing.Nombre,
+                PrecioPorMetroLineal = existing.PrecioPorMetroLineal,
+                FechaUltimaActualizacion = existing.FechaUltimaActualizacion,
+                MotivoUltimaActualizacion = existing.MotivoUltimaActualizacion,
+            };
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        await _form.ValidateAsync();
+        if (!_form.IsValid)
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        if (TerminacionCantoId == 0)
+        {
+            db.TerminacionesCanto.Add(new TerminacionCanto
+            {
+                Nombre = _model.Nombre,
+                PrecioPorMetroLineal = _model.PrecioPorMetroLineal,
+            });
+        }
+        else
+        {
+            var existing = await db.TerminacionesCanto.FindAsync(TerminacionCantoId);
+            if (existing is not null)
+            {
+                existing.Nombre = _model.Nombre;
+                existing.PrecioPorMetroLineal = _model.PrecioPorMetroLineal;
+                existing.FechaUltimaActualizacion = DateTime.UtcNow;
+                existing.MotivoUltimaActualizacion = _motivoCambio;
+            }
+        }
+
+        await db.SaveChangesAsync();
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

@@ -1,0 +1,105 @@
+@page "/empleados"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = Roles.Dueno)]
+@using MarmolesOeste.Web.Components.Dialogs
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<PageTitle>Empleados</PageTitle>
+
+<MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h4">Empleados</MudText>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreateAsync">
+        Nuevo empleado
+    </MudButton>
+</MudStack>
+
+<MudTable Items="_empleados" Loading="_loading" Hover="true">
+    <HeaderContent>
+        <MudTh>Nombre</MudTh>
+        <MudTh>Puesto</MudTh>
+        <MudTh>Teléfono</MudTh>
+        <MudTh>Email</MudTh>
+        <MudTh></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Nombre">@context.Nombre</MudTd>
+        <MudTd DataLabel="Puesto">@context.Puesto</MudTd>
+        <MudTd DataLabel="Teléfono">@context.Telefono</MudTd>
+        <MudTd DataLabel="Email">@context.Email</MudTd>
+        <MudTd>
+            <MudTooltip Text="Ver tareas asignadas">
+                <MudIconButton Icon="@Icons.Material.Filled.Checklist" Size="Size.Small" Href="/tareas" />
+            </MudTooltip>
+            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => OpenEditAsync(context)" />
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DarDeBajaAsync(context)" />
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText>No hay empleados cargados.</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@code {
+    private List<Empleado> _empleados = new();
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _empleados = await db.Empleados.OrderBy(e => e.Nombre).ToListAsync();
+        _loading = false;
+    }
+
+    private async Task OpenCreateAsync()
+    {
+        var reference = await DialogService.ShowAsync<EmpleadoEditDialog>("Nuevo empleado");
+        var result = await reference.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task OpenEditAsync(Empleado empleado)
+    {
+        var parameters = new DialogParameters<EmpleadoEditDialog> { { x => x.EmpleadoId, empleado.Id } };
+        var reference = await DialogService.ShowAsync<EmpleadoEditDialog>("Editar empleado", parameters);
+        var result = await reference.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task DarDeBajaAsync(Empleado empleado)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { x => x.Title, "Confirmar baja" },
+            { x => x.Message, $"¿Dar de baja al empleado \"{empleado.Nombre}\"?" },
+            { x => x.ConfirmText, "Dar de baja" },
+        };
+        var reference = await DialogService.ShowAsync<ConfirmDialog>(null, parameters);
+        var result = await reference.Result;
+
+        if (result is not { Canceled: false })
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.Empleados.FindAsync(empleado.Id);
+        if (entity is not null)
+        {
+            entity.FechaBaja = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            Snackbar.Add("Empleado dado de baja.", Severity.Success);
+            await LoadAsync();
+        }
+    }
+}

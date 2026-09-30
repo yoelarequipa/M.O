@@ -1,0 +1,84 @@
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<MudDialog>
+    <TitleContent>Asignar cliente</TitleContent>
+    <DialogContent>
+        @if (_creandoNuevo)
+        {
+            <ClienteFormFields @ref="_camposNuevoCliente" Model="_nuevoCliente" />
+        }
+        else
+        {
+            <MudSelect T="int" @bind-Value="_clienteId" Label="Cliente" Required="true" RequiredError="Elegí un cliente" Class="mb-2">
+                @foreach (var cliente in _clientes)
+                {
+                    <MudSelectItem T="int" Value="@cliente.Id">@cliente.Nombre</MudSelectItem>
+                }
+            </MudSelect>
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => _creandoNuevo = true)">
+                Crear cliente nuevo
+            </MudButton>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancelar</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Asignar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public int PresupuestoId { get; set; }
+
+    private List<Cliente> _clientes = new();
+    private int _clienteId;
+    private bool _creandoNuevo;
+    private Cliente _nuevoCliente = new();
+    private ClienteFormFields? _camposNuevoCliente;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _clientes = await db.Clientes.OrderBy(c => c.Nombre).ToListAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        int clienteId;
+
+        if (_creandoNuevo)
+        {
+            if (_camposNuevoCliente is null || !await _camposNuevoCliente.ValidateAsync())
+            {
+                return;
+            }
+
+            db.Clientes.Add(_nuevoCliente);
+            await db.SaveChangesAsync();
+            clienteId = _nuevoCliente.Id;
+        }
+        else
+        {
+            if (_clienteId == 0)
+            {
+                return;
+            }
+
+            clienteId = _clienteId;
+        }
+
+        var presupuesto = await db.Presupuestos.FindAsync(PresupuestoId);
+        if (presupuesto is null)
+        {
+            return;
+        }
+
+        presupuesto.ClienteId = clienteId;
+        await db.SaveChangesAsync();
+
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

@@ -1,0 +1,282 @@
+@page "/ventas/{Id:int}"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using MarmolesOeste.Web.Components.Dialogs
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject NavigationManager NavigationManager
+
+<PageTitle>Venta</PageTitle>
+
+@if (_venta is null)
+{
+    <MudText>Cargando...</MudText>
+}
+else
+{
+    <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-4">
+        <div>
+            <MudText Typo="Typo.h4">Venta — @_venta.Presupuesto.Cliente!.Nombre</MudText>
+            <MudText Typo="Typo.body2">
+                Presupuesto Nº @_venta.Presupuesto.NumeroCorrelativo · @_venta.Fecha.ToLocalTime().ToString("dd/MM/yyyy")
+            </MudText>
+        </div>
+        <MudStack Row="true" Spacing="2">
+            <MudButton Variant="Variant.Outlined" Href="@($"/presupuestos/{_venta.PresupuestoId}")">Ver presupuesto</MudButton>
+            <MudText Typo="Typo.h5">@_venta.Total.ToString("C2")</MudText>
+        </MudStack>
+    </MudStack>
+
+    <MudPaper Class="pa-4 mb-4">
+        <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+            <div>
+                <MudText Typo="Typo.h6">Producción</MudText>
+                <MudChip T="string" Color="ProduccionColor()">@_venta.OrdenProduccion?.Estado</MudChip>
+                @if (_venta.OrdenProduccion?.FechaInicio is not null)
+                {
+                    <MudText Typo="Typo.caption">Inicio: @_venta.OrdenProduccion.FechaInicio.Value.ToLocalTime().ToString("dd/MM/yyyy")</MudText>
+                }
+                @if (_venta.OrdenProduccion?.FechaFin is not null)
+                {
+                    <MudText Typo="Typo.caption">Fin: @_venta.OrdenProduccion.FechaFin.Value.ToLocalTime().ToString("dd/MM/yyyy")</MudText>
+                }
+            </div>
+            <MudStack Row="true" Spacing="2">
+                @if (_venta.OrdenProduccion?.Estado == EstadoOrdenProduccion.Pendiente)
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="IniciarProduccionAsync">Iniciar producción</MudButton>
+                }
+                @if (_venta.OrdenProduccion?.Estado == EstadoOrdenProduccion.EnProceso)
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="TerminarProduccionAsync">Marcar terminada</MudButton>
+                }
+            </MudStack>
+        </MudStack>
+    </MudPaper>
+
+    <MudPaper Class="pa-4 mb-4">
+        <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-2">
+            <div>
+                <MudText Typo="Typo.h6">Pago</MudText>
+                <MudText Typo="Typo.body2">Pagado @_pagado.ToString("C2") de @_venta.Total.ToString("C2")</MudText>
+                <MudText Typo="Typo.body2" Color="@(Saldo() > 0 ? Color.Error : Color.Success)">Saldo pendiente: @Saldo().ToString("C2")</MudText>
+            </div>
+            @if (Saldo() > 0)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenRegistrarPagoAsync">
+                    Registrar pago
+                </MudButton>
+            }
+        </MudStack>
+        <MudTable Items="_pagos" Hover="true" Dense="true">
+            <HeaderContent>
+                <MudTh>Fecha</MudTh>
+                <MudTh>Concepto</MudTh>
+                <MudTh>Medio de pago</MudTh>
+                <MudTh>Monto</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Fecha">@context.Fecha.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
+                <MudTd DataLabel="Concepto">@context.Concepto</MudTd>
+                <MudTd DataLabel="Medio de pago">@context.MedioPago</MudTd>
+                <MudTd DataLabel="Monto">@(context.Tipo == TipoMovimientoCaja.Ingreso ? "+" : "-")@context.Monto.ToString("C2")</MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText>Todavía no se registró ningún pago.</MudText>
+            </NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+
+    <MudPaper Class="pa-4">
+        <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-2">
+            <MudText Typo="Typo.h6">Entregas</MudText>
+            @if (PuedeProgramarEntrega())
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreateEntregaAsync">
+                    Programar entrega
+                </MudButton>
+            }
+        </MudStack>
+        <MudTable Items="_venta.Entregas" Hover="true">
+            <HeaderContent>
+                <MudTh>Fecha programada</MudTh>
+                <MudTh>Dirección</MudTh>
+                <MudTh>Estado</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Fecha programada">@context.FechaProgramada.ToString("dd/MM/yyyy")</MudTd>
+                <MudTd DataLabel="Dirección">@context.Direccion</MudTd>
+                <MudTd DataLabel="Estado">@context.Estado</MudTd>
+                <MudTd>
+                    @if (context.Estado == EstadoEntrega.Programada)
+                    {
+                        @if (_venta!.OrdenProduccion?.Estado == EstadoOrdenProduccion.Terminada)
+                        {
+                            <MudButton Size="Size.Small" OnClick="() => CambiarEstadoEntregaAsync(context, EstadoEntrega.EnCamino)">En camino</MudButton>
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.caption" Class="mr-2">Esperando fin de producción</MudText>
+                        }
+                        <MudButton Size="Size.Small" Color="Color.Error" OnClick="() => CambiarEstadoEntregaAsync(context, EstadoEntrega.Cancelada)">Cancelar</MudButton>
+                    }
+                    @if (context.Estado == EstadoEntrega.EnCamino)
+                    {
+                        <MudButton Size="Size.Small" Color="Color.Success" OnClick="() => CambiarEstadoEntregaAsync(context, EstadoEntrega.Entregada)">Entregada</MudButton>
+                    }
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText>No hay entregas programadas.</MudText>
+            </NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private Venta? _venta;
+    private List<MovimientoCaja> _pagos = new();
+    private decimal _pagado;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _venta = await db.Ventas
+            .Include(v => v.Presupuesto).ThenInclude(p => p.Cliente)
+            .Include(v => v.OrdenProduccion)
+            .Include(v => v.Entregas)
+            .FirstOrDefaultAsync(v => v.Id == Id);
+
+        if (_venta is null)
+        {
+            NavigationManager.NavigateTo("/ventas");
+            return;
+        }
+
+        _pagos = await db.MovimientosCaja
+            .Where(m => m.VentaId == Id)
+            .OrderByDescending(m => m.Fecha)
+            .ToListAsync();
+        _pagado = await VentaCalculos.MontoPagadoAsync(db, Id);
+    }
+
+    private decimal Saldo() => Math.Max(_venta!.Total - _pagado, 0m);
+
+    private async Task OpenRegistrarPagoAsync()
+    {
+        var parameters = new DialogParameters<MovimientoCajaDialog>
+        {
+            { x => x.Tipo, TipoMovimientoCaja.Ingreso },
+            { x => x.VentaIdFijo, Id },
+            { x => x.ConceptoSugerido, $"Pago venta Nº {_venta!.Presupuesto.NumeroCorrelativo}" },
+            { x => x.MontoSugerido, Saldo() },
+        };
+        var reference = await DialogService.ShowAsync<MovimientoCajaDialog>("Registrar pago", parameters);
+        var result = await reference.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+
+    private Color ProduccionColor() => _venta?.OrdenProduccion?.Estado switch
+    {
+        EstadoOrdenProduccion.Pendiente => Color.Default,
+        EstadoOrdenProduccion.EnProceso => Color.Info,
+        EstadoOrdenProduccion.Terminada => Color.Success,
+        _ => Color.Default,
+    };
+
+    private async Task IniciarProduccionAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var orden = await db.OrdenesProduccion.FirstOrDefaultAsync(o => o.VentaId == Id);
+        if (orden is null)
+        {
+            return;
+        }
+
+        orden.Estado = EstadoOrdenProduccion.EnProceso;
+        orden.FechaInicio = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        Snackbar.Add("Producción iniciada.", Severity.Success);
+        await LoadAsync();
+    }
+
+    private async Task TerminarProduccionAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var orden = await db.OrdenesProduccion.FirstOrDefaultAsync(o => o.VentaId == Id);
+        if (orden is null)
+        {
+            return;
+        }
+
+        orden.Estado = EstadoOrdenProduccion.Terminada;
+        orden.FechaFin = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        Snackbar.Add("Producción terminada.", Severity.Success);
+        await LoadAsync();
+    }
+
+    // Como máximo una entrega "activa" (no cancelada) por venta: una vez que una
+    // entrega está programada, en camino o ya entregada, no tiene sentido agendar
+    // otra encima. Si se cancela, se puede volver a programar.
+    private bool PuedeProgramarEntrega() =>
+        _venta!.Entregas.All(e => e.Estado == EstadoEntrega.Cancelada);
+
+    private async Task OpenCreateEntregaAsync()
+    {
+        if (!PuedeProgramarEntrega())
+        {
+            return;
+        }
+
+        var parameters = new DialogParameters<EntregaCreateDialog>
+        {
+            { x => x.VentaId, Id },
+            { x => x.DireccionSugerida, _venta!.Presupuesto.Cliente!.DireccionObra ?? string.Empty },
+        };
+        var reference = await DialogService.ShowAsync<EntregaCreateDialog>("Programar entrega", parameters);
+        var result = await reference.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task CambiarEstadoEntregaAsync(Entrega entrega, EstadoEntrega nuevoEstado)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        if (nuevoEstado == EstadoEntrega.EnCamino)
+        {
+            var orden = await db.OrdenesProduccion.FirstOrDefaultAsync(o => o.VentaId == Id);
+            if (orden?.Estado != EstadoOrdenProduccion.Terminada)
+            {
+                Snackbar.Add("No se puede despachar: la producción todavía no terminó.", Severity.Warning);
+                return;
+            }
+        }
+
+        var entidad = await db.Entregas.FindAsync(entrega.Id);
+        if (entidad is null)
+        {
+            return;
+        }
+
+        entidad.Estado = nuevoEstado;
+        if (nuevoEstado == EstadoEntrega.Entregada)
+        {
+            entidad.FechaEntregada = DateTime.UtcNow;
+        }
+        await db.SaveChangesAsync();
+        await LoadAsync();
+    }
+}

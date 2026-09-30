@@ -1,0 +1,251 @@
+@page "/tareas"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using MarmolesOeste.Web.Components.Dialogs
+@using MarmolesOeste.Web.Data.Enums
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject IDialogService DialogService
+
+<PageTitle>Tareas</PageTitle>
+
+<MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+        <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" OnClick="DiaAnteriorAsync" />
+        <MudText Typo="Typo.h4">Tareas — @_fecha.ToString("dd/MM/yyyy")</MudText>
+        <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" OnClick="DiaSiguienteAsync" />
+        @if (_fecha.Date != DateTime.UtcNow.Date)
+        {
+            <MudButton Variant="Variant.Text" OnClick="IrAHoyAsync">Hoy</MudButton>
+        }
+    </MudStack>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreateAsync">
+        Nueva tarea
+    </MudButton>
+</MudStack>
+
+@if (_loading)
+{
+    <MudText>Cargando...</MudText>
+}
+else if (_grupos.Count == 0)
+{
+    <MudText Color="Color.Secondary">No hay tareas cargadas para este día.</MudText>
+}
+else
+{
+    <MudGrid>
+        @foreach (var grupo in _grupos)
+        {
+            <MudItem xs="12" md="6" lg="4">
+                <MudPaper Class="pa-4">
+                    <MudText Typo="Typo.h6" Class="mb-2">@grupo.NombreEmpleado</MudText>
+                    @foreach (var tarea in grupo.Tareas)
+                    {
+                        <MudStack Row="true" AlignItems="AlignItems.Start" Class="mb-1">
+                            <div style="position:relative; display:inline-block;">
+                                <MudChip T="string" Size="Size.Small" Color="@EstadoColor(tarea.Estado)" Icon="@EstadoIcon(tarea.Estado)" OnClick="() => ToggleMenu(tarea.Id)">
+                                    @EstadoLabel(tarea.Estado)
+                                </MudChip>
+                                @if (_menuAbiertoTareaId == tarea.Id)
+                                {
+                                    <MudPaper Class="pa-1" Elevation="4" Style="position:absolute; top:110%; left:0; z-index:10; min-width:150px;">
+                                        <MudList T="EstadoTarea" Dense="true">
+                                            <MudListItem T="EstadoTarea" OnClick="() => SeleccionarEstadoAsync(tarea, EstadoTarea.Pendiente)">Pendiente</MudListItem>
+                                            <MudListItem T="EstadoTarea" OnClick="() => SeleccionarEstadoAsync(tarea, EstadoTarea.EnCurso)">En curso</MudListItem>
+                                            <MudListItem T="EstadoTarea" OnClick="() => SeleccionarEstadoAsync(tarea, EstadoTarea.Completada)">Completada</MudListItem>
+                                        </MudList>
+                                    </MudPaper>
+                                }
+                            </div>
+                            <div style="flex-grow:1">
+                                <MudText Typo="Typo.body1" Style="@EstadoTextoEstilo(tarea.Estado)">@tarea.Titulo</MudText>
+                                @if (!string.IsNullOrWhiteSpace(tarea.Descripcion))
+                                {
+                                    <MudText Typo="Typo.body2" Color="Color.Secondary">@tarea.Descripcion</MudText>
+                                }
+                                @if (tarea.Venta is not null)
+                                {
+                                    <MudLink Href="@($"/ventas/{tarea.VentaId}")" Typo="Typo.body2">
+                                        Venta Nº @tarea.Venta.Presupuesto.NumeroCorrelativo — @tarea.Venta.Presupuesto.Cliente!.Nombre
+                                    </MudLink>
+                                }
+                            </div>
+                            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => OpenEditAsync(tarea)" />
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => EliminarAsync(tarea)" />
+                        </MudStack>
+                    }
+                </MudPaper>
+            </MudItem>
+        }
+    </MudGrid>
+}
+
+@code {
+    private DateTime _fecha = DateTime.UtcNow.Date;
+    private List<GrupoEmpleado> _grupos = new();
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var tareas = await db.Tareas
+            .Include(t => t.Empleado)
+            .Include(t => t.Venta).ThenInclude(v => v!.Presupuesto).ThenInclude(p => p.Cliente)
+            .Where(t => t.Fecha.Date == _fecha.Date)
+            .ToListAsync();
+
+        _grupos = tareas
+            .GroupBy(t => t.Empleado?.Nombre ?? "Sin asignar")
+            .OrderBy(g => g.Key == "Sin asignar" ? 1 : 0)
+            .ThenBy(g => g.Key)
+            .Select(g => new GrupoEmpleado(g.Key, g.OrderBy(t => Prioridad(t.Estado)).ThenBy(t => t.Titulo).ToList()))
+            .ToList();
+
+        _loading = false;
+    }
+
+    private async Task DiaAnteriorAsync()
+    {
+        _fecha = _fecha.AddDays(-1);
+        await LoadAsync();
+    }
+
+    private async Task DiaSiguienteAsync()
+    {
+        _fecha = _fecha.AddDays(1);
+        await LoadAsync();
+    }
+
+    private async Task IrAHoyAsync()
+    {
+        _fecha = DateTime.UtcNow.Date;
+        await LoadAsync();
+    }
+
+    private async Task OpenCreateAsync()
+    {
+        var parameters = new DialogParameters<TareaDialog> { { x => x.FechaSugerida, _fecha } };
+        var reference = await DialogService.ShowAsync<TareaDialog>("Nueva tarea", parameters);
+        var result = await reference.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task OpenEditAsync(Tarea tarea)
+    {
+        var parameters = new DialogParameters<TareaDialog> { { x => x.TareaId, tarea.Id } };
+        var reference = await DialogService.ShowAsync<TareaDialog>("Editar tarea", parameters);
+        var result = await reference.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+
+    private int? _menuAbiertoTareaId;
+
+    private void ToggleMenu(int tareaId)
+    {
+        _menuAbiertoTareaId = _menuAbiertoTareaId == tareaId ? null : tareaId;
+    }
+
+    private async Task SeleccionarEstadoAsync(Tarea tarea, EstadoTarea nuevoEstado)
+    {
+        _menuAbiertoTareaId = null;
+        await CambiarEstadoAsync(tarea, nuevoEstado);
+    }
+
+    private async Task CambiarEstadoAsync(Tarea tarea, EstadoTarea nuevoEstado)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entidad = await db.Tareas.FindAsync(tarea.Id);
+        if (entidad is null)
+        {
+            return;
+        }
+
+        if (nuevoEstado == EstadoTarea.EnCurso && entidad.EmpleadoId is not null)
+        {
+            var otrasEnCurso = await db.Tareas
+                .Where(t => t.EmpleadoId == entidad.EmpleadoId && t.Id != entidad.Id && t.Estado == EstadoTarea.EnCurso)
+                .ToListAsync();
+            foreach (var otra in otrasEnCurso)
+            {
+                otra.Estado = EstadoTarea.Pendiente;
+            }
+        }
+
+        entidad.Estado = nuevoEstado;
+        entidad.FechaCompletada = nuevoEstado == EstadoTarea.Completada ? DateTime.UtcNow : null;
+        await db.SaveChangesAsync();
+        await LoadAsync();
+    }
+
+    private static int Prioridad(EstadoTarea estado) => estado switch
+    {
+        EstadoTarea.EnCurso => 0,
+        EstadoTarea.Pendiente => 1,
+        EstadoTarea.Completada => 2,
+        _ => 3,
+    };
+
+    private static string EstadoTextoEstilo(EstadoTarea estado) => estado switch
+    {
+        EstadoTarea.Completada => "text-decoration:line-through",
+        EstadoTarea.EnCurso => "font-weight:600",
+        _ => "",
+    };
+
+    private static Color EstadoColor(EstadoTarea estado) => estado switch
+    {
+        EstadoTarea.EnCurso => Color.Warning,
+        EstadoTarea.Completada => Color.Success,
+        _ => Color.Default,
+    };
+
+    private static string EstadoIcon(EstadoTarea estado) => estado switch
+    {
+        EstadoTarea.EnCurso => Icons.Material.Filled.PlayCircle,
+        EstadoTarea.Completada => Icons.Material.Filled.CheckCircle,
+        _ => Icons.Material.Filled.RadioButtonUnchecked,
+    };
+
+    private static string EstadoLabel(EstadoTarea estado) => estado switch
+    {
+        EstadoTarea.EnCurso => "En curso",
+        EstadoTarea.Completada => "Completada",
+        _ => "Pendiente",
+    };
+
+    private async Task EliminarAsync(Tarea tarea)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { x => x.Title, "Eliminar tarea" },
+            { x => x.Message, $"¿Eliminar la tarea \"{tarea.Titulo}\"?" },
+            { x => x.ConfirmText, "Eliminar" },
+        };
+        var reference = await DialogService.ShowAsync<ConfirmDialog>(null, parameters);
+        var result = await reference.Result;
+        if (result is not { Canceled: false })
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entidad = await db.Tareas.FindAsync(tarea.Id);
+        if (entidad is not null)
+        {
+            db.Tareas.Remove(entidad);
+            await db.SaveChangesAsync();
+            await LoadAsync();
+        }
+    }
+
+    private sealed record GrupoEmpleado(string NombreEmpleado, List<Tarea> Tareas);
+}

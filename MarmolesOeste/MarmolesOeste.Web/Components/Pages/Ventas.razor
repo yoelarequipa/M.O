@@ -1,0 +1,72 @@
+@page "/ventas"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager NavigationManager
+
+<PageTitle>Ventas</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Ventas</MudText>
+
+<MudTable Items="_ventas" Loading="_loading" Hover="true" T="Venta" OnRowClick="RowClicked" RowStyle="cursor:pointer">
+    <HeaderContent>
+        <MudTh>Cliente</MudTh>
+        <MudTh>Presupuesto</MudTh>
+        <MudTh>Fecha</MudTh>
+        <MudTh>Producción</MudTh>
+        <MudTh>Total</MudTh>
+        <MudTh>Pago</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Cliente">@context.Presupuesto.Cliente!.Nombre</MudTd>
+        <MudTd DataLabel="Presupuesto">Nº @context.Presupuesto.NumeroCorrelativo</MudTd>
+        <MudTd DataLabel="Fecha">@context.Fecha.ToLocalTime().ToString("dd/MM/yyyy")</MudTd>
+        <MudTd DataLabel="Producción">@(context.OrdenProduccion?.Estado.ToString() ?? "-")</MudTd>
+        <MudTd DataLabel="Total">@context.Total.ToString("C2")</MudTd>
+        <MudTd DataLabel="Pago">
+            <MudChip T="string" Size="Size.Small" Color="@EstadoPagoColor(context)">@EstadoPagoTexto(context)</MudChip>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText>Todavía no se generó ninguna venta. Las ventas se crean desde un presupuesto en estado "Aceptado".</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@code {
+    private List<Venta> _ventas = new();
+    private Dictionary<int, decimal> _pagado = new();
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _ventas = await db.Ventas
+            .Include(v => v.Presupuesto).ThenInclude(p => p.Cliente)
+            .Include(v => v.OrdenProduccion)
+            .OrderByDescending(v => v.Fecha)
+            .ToListAsync();
+        _pagado = await VentaCalculos.MontoPagadoPorVentaAsync(db);
+        _loading = false;
+    }
+
+    private decimal Pagado(Venta venta) => _pagado.GetValueOrDefault(venta.Id);
+
+    private string EstadoPagoTexto(Venta venta)
+    {
+        var pagado = Pagado(venta);
+        if (pagado <= 0) return "Sin pago";
+        if (pagado < venta.Total) return $"Seña {pagado.ToString("C0")}";
+        return "Pagado";
+    }
+
+    private Color EstadoPagoColor(Venta venta)
+    {
+        var pagado = Pagado(venta);
+        if (pagado <= 0) return Color.Error;
+        if (pagado < venta.Total) return Color.Warning;
+        return Color.Success;
+    }
+
+    private void RowClicked(TableRowClickEventArgs<Venta> args) =>
+        NavigationManager.NavigateTo($"/ventas/{args.Item!.Id}");
+}

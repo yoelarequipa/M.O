@@ -1,0 +1,166 @@
+@page "/clientes/{Id:int}"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager NavigationManager
+
+<PageTitle>Cliente</PageTitle>
+
+@if (_cliente is null)
+{
+    <MudText>Cargando...</MudText>
+}
+else
+{
+    <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-4">
+        <div>
+            <MudText Typo="Typo.h4">@_cliente.Nombre</MudText>
+            <MudText Typo="Typo.body2">
+                @(_cliente.Telefono ?? "Sin teléfono") · @(_cliente.Email ?? "Sin email")
+            </MudText>
+            @if (!string.IsNullOrWhiteSpace(_cliente.DireccionObra))
+            {
+                <MudText Typo="Typo.body2">Obra: @_cliente.DireccionObra</MudText>
+            }
+        </div>
+        <MudButton Variant="Variant.Outlined" Href="/clientes">Volver a clientes</MudButton>
+    </MudStack>
+
+    <MudGrid Class="mb-4">
+        <MudItem xs="12" sm="4">
+            <MudPaper Class="pa-4">
+                <MudText Typo="Typo.body2">Total comprado histórico</MudText>
+                <MudText Typo="Typo.h4">@_totalComprado.ToString("C0")</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <MudPaper Class="pa-4">
+                <MudText Typo="Typo.body2">Compras realizadas</MudText>
+                <MudText Typo="Typo.h4">@_ventas.Count</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <MudPaper Class="pa-4">
+                <MudText Typo="Typo.body2">Saldo pendiente total</MudText>
+                <MudText Typo="Typo.h4" Color="@(_saldoPendienteTotal > 0 ? Color.Error : Color.Success)">@_saldoPendienteTotal.ToString("C0")</MudText>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <MudPaper Class="pa-4 mb-4">
+        <MudText Typo="Typo.h6" Class="mb-2">Historial de compras</MudText>
+        @if (_ventas.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Este cliente todavía no generó ninguna venta.</MudText>
+        }
+        else
+        {
+            <MudTable Items="_ventas" Hover="true" T="Venta" OnRowClick="RowClicked" RowStyle="cursor:pointer">
+                <HeaderContent>
+                    <MudTh>Fecha</MudTh>
+                    <MudTh>Presupuesto</MudTh>
+                    <MudTh>Producción</MudTh>
+                    <MudTh>Total</MudTh>
+                    <MudTh>Pago</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Fecha">@context.Fecha.ToLocalTime().ToString("dd/MM/yyyy")</MudTd>
+                    <MudTd DataLabel="Presupuesto">Nº @context.Presupuesto.NumeroCorrelativo</MudTd>
+                    <MudTd DataLabel="Producción">@(context.OrdenProduccion?.Estado.ToString() ?? "-")</MudTd>
+                    <MudTd DataLabel="Total">@context.Total.ToString("C2")</MudTd>
+                    <MudTd DataLabel="Pago">
+                        <MudChip T="string" Size="Size.Small" Color="@EstadoPagoColor(context)">@EstadoPagoTexto(context)</MudChip>
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+    </MudPaper>
+
+    @if (_presupuestosSinVenta.Count > 0)
+    {
+        <MudPaper Class="pa-4">
+            <MudText Typo="Typo.h6" Class="mb-2">Presupuestos sin venta</MudText>
+            <MudSimpleTable Dense="true" Hover="true">
+                <thead>
+                    <tr>
+                        <th>Fecha</th>
+                        <th>Presupuesto</th>
+                        <th>Estado</th>
+                        <th class="text-right">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var presupuesto in _presupuestosSinVenta)
+                    {
+                        <tr style="cursor:pointer" @onclick="@(() => NavigationManager.NavigateTo($"/presupuestos/{presupuesto.Id}"))">
+                            <td>@presupuesto.Fecha.ToLocalTime().ToString("dd/MM/yyyy")</td>
+                            <td>Nº @presupuesto.NumeroCorrelativo</td>
+                            <td>@presupuesto.Estado</td>
+                            <td class="text-right">@presupuesto.Total.ToString("C2")</td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </MudPaper>
+    }
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private Cliente? _cliente;
+    private List<Venta> _ventas = new();
+    private List<Presupuesto> _presupuestosSinVenta = new();
+    private Dictionary<int, decimal> _pagado = new();
+    private decimal _totalComprado;
+    private decimal _saldoPendienteTotal;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _cliente = await db.Clientes.FindAsync(Id);
+        if (_cliente is null)
+        {
+            NavigationManager.NavigateTo("/clientes");
+            return;
+        }
+
+        _ventas = await db.Ventas
+            .Include(v => v.Presupuesto)
+            .Include(v => v.OrdenProduccion)
+            .Where(v => v.Presupuesto.ClienteId == Id)
+            .OrderByDescending(v => v.Fecha)
+            .ToListAsync();
+
+        _presupuestosSinVenta = await db.Presupuestos
+            .Where(p => p.ClienteId == Id && p.Venta == null)
+            .OrderByDescending(p => p.Fecha)
+            .ToListAsync();
+
+        _pagado = await VentaCalculos.MontoPagadoPorVentaAsync(db);
+
+        _totalComprado = _ventas.Sum(v => v.Total);
+        _saldoPendienteTotal = _ventas.Sum(v => Math.Max(v.Total - _pagado.GetValueOrDefault(v.Id), 0m));
+    }
+
+    private decimal Pagado(Venta venta) => _pagado.GetValueOrDefault(venta.Id);
+
+    private string EstadoPagoTexto(Venta venta)
+    {
+        var pagado = Pagado(venta);
+        if (pagado <= 0) return "Sin pago";
+        if (pagado < venta.Total) return $"Seña {pagado.ToString("C0")}";
+        return "Pagado";
+    }
+
+    private Color EstadoPagoColor(Venta venta)
+    {
+        var pagado = Pagado(venta);
+        if (pagado <= 0) return Color.Error;
+        if (pagado < venta.Total) return Color.Warning;
+        return Color.Success;
+    }
+
+    private void RowClicked(TableRowClickEventArgs<Venta> args) =>
+        NavigationManager.NavigateTo($"/ventas/{args.Item!.Id}");
+}

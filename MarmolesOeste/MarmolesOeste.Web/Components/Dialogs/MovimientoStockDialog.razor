@@ -1,0 +1,50 @@
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<MudDialog>
+    <TitleContent>@(Tipo == TipoMovimientoStock.Entrada ? "Registrar entrada" : "Registrar salida") — @NombreMaterial</TitleContent>
+    <DialogContent>
+        <MudForm @ref="_form">
+            <MudNumericField @bind-Value="_cantidad" Label="Cantidad (m²)" Required="true" Min="0.01m" Format="N2" Class="mb-2" />
+            <MudTextField @bind-Value="_motivo" Label="Motivo" Required="true" RequiredError="El motivo es obligatorio" Lines="2" />
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancelar</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Guardar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public int MaterialId { get; set; }
+    [Parameter] public string NombreMaterial { get; set; } = string.Empty;
+    [Parameter] public TipoMovimientoStock Tipo { get; set; }
+
+    private MudForm _form = null!;
+    private decimal _cantidad;
+    private string _motivo = string.Empty;
+
+    private async Task SaveAsync()
+    {
+        await _form.ValidateAsync();
+        if (!_form.IsValid)
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        db.MovimientosStock.Add(new MovimientoStock
+        {
+            MaterialId = MaterialId,
+            Cantidad = _cantidad,
+            Tipo = Tipo,
+            Motivo = _motivo,
+            Fecha = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

@@ -1,0 +1,140 @@
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<MudDialog>
+    <TitleContent>Generar venta</TitleContent>
+    <DialogContent>
+        <MudText Class="mb-2">Total del presupuesto: @_total.ToString("C2")</MudText>
+        <MudNumericField @bind-Value="_montoPagado" Label="Monto que paga ahora" Min="0m" Format="N2"
+                         Adornment="Adornment.Start" AdornmentText="$" Class="mb-2"
+                         HelperText="Dejá 0 si todavía no paga nada, o cargá una seña" />
+        @if (_montoPagado > 0)
+        {
+            <MudSelect T="MedioPago" @bind-Value="_medioPago" Label="Medio de pago" Class="mb-2">
+                @foreach (var medio in Enum.GetValues<MedioPago>())
+                {
+                    <MudSelectItem T="MedioPago" Value="@medio">@medio</MudSelectItem>
+                }
+            </MudSelect>
+        }
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Saldo pendiente luego de este pago: @Saldo().ToString("C2")
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancelar</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="ConfirmarAsync">Generar venta</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public int PresupuestoId { get; set; }
+
+    private decimal _total;
+    private decimal _montoPagado;
+    private MedioPago _medioPago = MedioPago.Efectivo;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var presupuesto = await db.Presupuestos.FindAsync(PresupuestoId);
+        _total = presupuesto?.Total ?? 0m;
+        _montoPagado = _total;
+    }
+
+    private decimal Saldo() => Math.Max(_total - _montoPagado, 0m);
+
+    private async Task ConfirmarAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var presupuesto = await db.Presupuestos
+            .Include(p => p.Piezas).ThenInclude(pz => pz.Tramos)
+            .FirstOrDefaultAsync(p => p.Id == PresupuestoId);
+
+        if (presupuesto is null || presupuesto.Estado != EstadoPresupuesto.Aceptado || presupuesto.ClienteId is null)
+        {
+            MudDialog.Cancel();
+            return;
+        }
+
+        if (await db.Ventas.AnyAsync(v => v.PresupuestoId == PresupuestoId))
+        {
+            MudDialog.Cancel();
+            return;
+        }
+
+        var venta = new Venta
+        {
+            PresupuestoId = PresupuestoId,
+            Fecha = DateTime.UtcNow,
+            Total = presupuesto.Total,
+        };
+        db.Ventas.Add(venta);
+        await db.SaveChangesAsync();
+
+        // La orden de producción se crea junto con la venta, en Pendiente: el taller
+        // todavía no arrancó a trabajar, pero ya sabe que hay algo en cola.
+        db.OrdenesProduccion.Add(new OrdenProduccion
+        {
+            VentaId = venta.Id,
+            Estado = EstadoOrdenProduccion.Pendiente,
+        });
+
+        // Descuenta del stock el área de cada pieza vendida, y por separado el área
+        // estimada del zócalo. Es una aproximación: no contempla el desperdicio de
+        // corte real de la placa.
+        foreach (var pieza in presupuesto.Piezas)
+        {
+            db.MovimientosStock.Add(new MovimientoStock
+            {
+                MaterialId = pieza.MaterialId,
+                Cantidad = PresupuestoCalculos.AreaM2(pieza),
+                Tipo = TipoMovimientoStock.Salida,
+                Motivo = $"Consumo de mesada por venta del presupuesto Nº {presupuesto.NumeroCorrelativo}",
+                Fecha = DateTime.UtcNow,
+                TipoDocumentoOrigen = TipoDocumentoOrigenStock.Venta,
+                DocumentoOrigenId = venta.Id,
+            });
+
+            if (pieza.LlevaZocalo)
+            {
+                db.MovimientosStock.Add(new MovimientoStock
+                {
+                    MaterialId = pieza.MaterialId,
+                    Cantidad = PresupuestoCalculos.AreaZocaloEstimada(pieza),
+                    Tipo = TipoMovimientoStock.Salida,
+                    Motivo = $"Consumo estimado de zócalo por venta del presupuesto Nº {presupuesto.NumeroCorrelativo}",
+                    Fecha = DateTime.UtcNow,
+                    TipoDocumentoOrigen = TipoDocumentoOrigenStock.Venta,
+                    DocumentoOrigenId = venta.Id,
+                });
+            }
+        }
+
+        // El pago inicial (si hay) se registra directo en Caja, vinculado a esta
+        // venta — es el único punto de conexión automática entre Ventas y Caja que
+        // decidimos: el resto de los movimientos de caja siguen siendo manuales.
+        if (_montoPagado > 0)
+        {
+            var concepto = _montoPagado < presupuesto.Total
+                ? $"Seña venta Nº {presupuesto.NumeroCorrelativo}"
+                : $"Pago venta Nº {presupuesto.NumeroCorrelativo}";
+
+            db.MovimientosCaja.Add(new MovimientoCaja
+            {
+                Tipo = TipoMovimientoCaja.Ingreso,
+                Concepto = concepto,
+                Monto = _montoPagado,
+                MedioPago = _medioPago,
+                Fecha = DateTime.UtcNow,
+                VentaId = venta.Id,
+            });
+        }
+
+        await db.SaveChangesAsync();
+
+        MudDialog.Close(DialogResult.Ok(venta.Id));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

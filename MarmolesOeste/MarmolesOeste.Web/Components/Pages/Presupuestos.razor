@@ -1,0 +1,69 @@
+@page "/presupuestos"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using MarmolesOeste.Web.Components.Dialogs
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject IDialogService DialogService
+@inject NavigationManager NavigationManager
+
+<PageTitle>Presupuestos</PageTitle>
+
+<MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h4">Presupuestos</MudText>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreateAsync">
+        Nuevo presupuesto
+    </MudButton>
+</MudStack>
+
+<MudTable Items="_presupuestos" Loading="_loading" Hover="true" T="Presupuesto" OnRowClick="RowClicked" RowStyle="cursor:pointer">
+    <HeaderContent>
+        <MudTh>Número</MudTh>
+        <MudTh>Cliente</MudTh>
+        <MudTh>Fecha</MudTh>
+        <MudTh>Vencimiento</MudTh>
+        <MudTh>Estado</MudTh>
+        <MudTh>Total</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Número">@context.NumeroCorrelativo</MudTd>
+        <MudTd DataLabel="Cliente">@(context.Cliente?.Nombre ?? context.NombreReferencia ?? "(sin datos)")</MudTd>
+        <MudTd DataLabel="Fecha">@context.Fecha.ToLocalTime().ToString("dd/MM/yyyy")</MudTd>
+        <MudTd DataLabel="Vencimiento">@context.FechaVencimiento.ToLocalTime().ToString("dd/MM/yyyy")</MudTd>
+        <MudTd DataLabel="Estado">@context.Estado</MudTd>
+        <MudTd DataLabel="Total">@context.Total.ToString("C2")</MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText>No hay presupuestos cargados.</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@code {
+    private List<Presupuesto> _presupuestos = new();
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _presupuestos = await db.Presupuestos
+            .Include(p => p.Cliente)
+            .OrderByDescending(p => p.NumeroCorrelativo)
+            .ToListAsync();
+        _loading = false;
+    }
+
+    private void RowClicked(TableRowClickEventArgs<Presupuesto> args) =>
+        NavigationManager.NavigateTo($"/presupuestos/{args.Item!.Id}");
+
+    private async Task OpenCreateAsync()
+    {
+        var reference = await DialogService.ShowAsync<PresupuestoHeaderDialog>("Nuevo presupuesto");
+        var result = await reference.Result;
+        if (result is { Canceled: false, Data: int nuevoId })
+        {
+            NavigationManager.NavigateTo($"/presupuestos/{nuevoId}");
+        }
+    }
+}

@@ -1,0 +1,80 @@
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<MudDialog>
+    <TitleContent>Nuevo presupuesto</TitleContent>
+    <DialogContent>
+        <MudForm @ref="_form">
+            <MudSelect T="int?" @bind-Value="_clienteId" Label="Cliente (opcional)" Clearable="true" Class="mb-2">
+                @foreach (var cliente in _clientes)
+                {
+                    <MudSelectItem T="int?" Value="@cliente.Id">@cliente.Nombre</MudSelectItem>
+                }
+            </MudSelect>
+            <MudTextField @bind-Value="_nombreReferencia" Label="Nombre de referencia"
+                          HelperText="Si todavía no tenés los datos del cliente, algo para reconocer el presupuesto después (ej: 'Sra. Pérez - mostrador')" Class="mb-2" />
+            <MudNumericField @bind-Value="_diasValidez" Label="Días de validez" Required="true" Min="1" />
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Class="mt-2">@_error</MudAlert>
+            }
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancelar</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Crear</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    private MudForm _form = null!;
+    private List<Cliente> _clientes = new();
+    private int? _clienteId;
+    private string? _nombreReferencia;
+    private int _diasValidez = 15;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _clientes = await db.Clientes.OrderBy(c => c.Nombre).ToListAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        await _form.ValidateAsync();
+        _error = null;
+
+        if (!_form.IsValid)
+        {
+            return;
+        }
+
+        if (_clienteId is null && string.IsNullOrWhiteSpace(_nombreReferencia))
+        {
+            _error = "Elegí un cliente o cargá un nombre de referencia para poder identificar el presupuesto.";
+            return;
+        }
+
+        var ahora = DateTime.UtcNow;
+        var presupuesto = new Presupuesto
+        {
+            ClienteId = _clienteId,
+            NombreReferencia = string.IsNullOrWhiteSpace(_nombreReferencia) ? null : _nombreReferencia.Trim(),
+            Fecha = ahora,
+            DiasValidez = _diasValidez,
+            FechaVencimiento = ahora.AddDays(_diasValidez),
+            Estado = EstadoPresupuesto.Borrador,
+            IvaPorcentaje = 21m,
+        };
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        db.Presupuestos.Add(presupuesto);
+        await db.SaveChangesAsync();
+
+        MudDialog.Close(DialogResult.Ok(presupuesto.Id));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

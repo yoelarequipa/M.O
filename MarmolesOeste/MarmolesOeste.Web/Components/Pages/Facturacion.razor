@@ -1,0 +1,300 @@
+@page "/facturacion"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using MarmolesOeste.Web.Components.Dialogs
+@using MarmolesOeste.Web.Data.Seed
+@using Microsoft.AspNetCore.Hosting
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager NavigationManager
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject IWebHostEnvironment Environment
+
+<PageTitle>Facturación</PageTitle>
+
+<MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h4">Facturación</MudText>
+    <MudStack Row="true" Spacing="2">
+        @if (Environment.IsDevelopment())
+        {
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="OpenGenerarDemoAsync">
+                Generar datos de ejemplo
+            </MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteSweep" OnClick="OpenBorrarDemoAsync">
+                Borrar datos de ejemplo
+            </MudButton>
+        }
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download" OnClick="OpenExportarAsync">
+            Exportar
+        </MudButton>
+    </MudStack>
+</MudStack>
+
+@if (_loading)
+{
+    <MudText>Cargando...</MudText>
+}
+else
+{
+    <MudGrid>
+        <MudItem xs="12" sm="4">
+            <MudPaper Class="pa-4">
+                <MudText Typo="Typo.body2">Hoy</MudText>
+                <MudText Typo="Typo.h4">@_facturacionHoy.ToString("C0")</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@_ventasHoy venta@(_ventasHoy == 1 ? "" : "s")</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <MudPaper Class="pa-4">
+                <MudText Typo="Typo.body2">Esta semana</MudText>
+                <MudText Typo="Typo.h4">@_facturacionSemana.ToString("C0")</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@_ventasSemana venta@(_ventasSemana == 1 ? "" : "s")</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <MudPaper Class="pa-4">
+                <MudText Typo="Typo.body2">Este mes</MudText>
+                <MudText Typo="Typo.h4">@_facturacionMes.ToString("C0")</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@_ventasMes venta@(_ventasMes == 1 ? "" : "s")</MudText>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <MudPaper Class="pa-4 mt-4">
+        <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-2">
+            <MudText Typo="Typo.h6">Ventas del mes</MudText>
+            <MudLink Href="/ventas">Ver todas las ventas</MudLink>
+        </MudStack>
+        @if (_ventasDelMes.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Color="Color.Secondary">No hay ventas registradas este mes.</MudText>
+        }
+        else
+        {
+            <MudSimpleTable Dense="true" Hover="true">
+                <thead>
+                    <tr>
+                        <th>Fecha</th>
+                        <th>Cliente</th>
+                        <th>Presupuesto</th>
+                        <th class="text-right">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var venta in _ventasDelMes)
+                    {
+                        <tr style="cursor:pointer" @onclick="@(() => NavigationManager.NavigateTo($"/ventas/{venta.Id}"))">
+                            <td>@venta.Fecha.ToLocalTime().ToString("dd/MM/yyyy")</td>
+                            <td>@venta.Presupuesto.Cliente!.Nombre</td>
+                            <td>Nº @venta.Presupuesto.NumeroCorrelativo</td>
+                            <td class="text-right">@venta.Total.ToString("C2")</td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        }
+    </MudPaper>
+
+    <MudGrid Class="mt-4">
+        <MudItem xs="12" md="6">
+            <MudPaper Class="pa-4">
+                <MudText Typo="Typo.h6" Class="mb-2">Ventas por mes (últimos 12 meses)</MudText>
+                @if (_serieVentasPorMes.Sum(s => s.Data.Sum()) == 0)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Todavía no hay ventas registradas.</MudText>
+                }
+                else
+                {
+                    <MudChart ChartType="ChartType.Bar" ChartSeries="@_serieVentasPorMes" ChartLabels="@_labelsVentasPorMes"
+                              Width="100%" Height="300px" />
+                }
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudPaper Class="pa-4">
+                <MudText Typo="Typo.h6" Class="mb-2">Materiales más vendidos (m² — histórico)</MudText>
+                @if (_serieMateriales.Sum(s => s.Data.Sum()) == 0)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Todavía no hay piezas vendidas.</MudText>
+                }
+                else
+                {
+                    <MudChart ChartType="ChartType.Bar" ChartSeries="@_serieMateriales" ChartLabels="@_labelsMateriales"
+                              Width="100%" Height="300px" />
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    private async Task OpenExportarAsync()
+    {
+        await DialogService.ShowAsync<ExportarFacturacionDialog>("Exportar facturación");
+    }
+
+    // Solo para desarrollo: genera ventas ficticias de los últimos 12 meses (atadas a
+    // clientes "[DEMO] ...") para poder ver los gráficos con datos antes de tener
+    // ventas reales cargadas. No aparece si el sitio corre en Production.
+    private async Task OpenGenerarDemoAsync()
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { x => x.Title, "Generar datos de ejemplo" },
+            { x => x.Message, "Esto crea ventas ficticias de los últimos 12 meses (con clientes marcados \"[DEMO]\") solo para previsualizar los gráficos. Se pueden borrar después con \"Borrar datos de ejemplo\". ¿Continuar?" },
+            { x => x.ConfirmText, "Generar" },
+        };
+        var reference = await DialogService.ShowAsync<ConfirmDialog>(null, parameters);
+        var result = await reference.Result;
+        if (result is not { Canceled: false })
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var cantidad = await DemoVentasSeeder.SeedAsync(db);
+        Snackbar.Add($"Se generaron {cantidad} ventas de ejemplo.", Severity.Success);
+        await ReloadAsync();
+    }
+
+    private async Task OpenBorrarDemoAsync()
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { x => x.Title, "Borrar datos de ejemplo" },
+            { x => x.Message, "Esto borra todas las ventas, presupuestos y clientes marcados \"[DEMO]\". No afecta datos reales. ¿Continuar?" },
+            { x => x.ConfirmText, "Borrar" },
+        };
+        var reference = await DialogService.ShowAsync<ConfirmDialog>(null, parameters);
+        var result = await reference.Result;
+        if (result is not { Canceled: false })
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var cantidad = await DemoVentasSeeder.ClearDemoAsync(db);
+        Snackbar.Add($"Se borraron {cantidad} ventas de ejemplo.", Severity.Success);
+        await ReloadAsync();
+    }
+
+    private bool _loading = true;
+
+    private decimal _facturacionHoy;
+    private decimal _facturacionSemana;
+    private decimal _facturacionMes;
+    private int _ventasHoy;
+    private int _ventasSemana;
+    private int _ventasMes;
+    private List<Venta> _ventasDelMes = new();
+    private List<ChartSeries<double>> _serieVentasPorMes = new();
+    private string[] _labelsVentasPorMes = Array.Empty<string>();
+    private List<ChartSeries<double>> _serieMateriales = new();
+    private string[] _labelsMateriales = Array.Empty<string>();
+
+    private static readonly string[] _nombresMesesAbrev =
+    [
+        "Ene", "Feb", "Mar", "Abr", "May", "Jun",
+        "Jul", "Ago", "Sep", "Oct", "Nov", "Dic",
+    ];
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        // Los límites de "hoy/semana/mes" se calculan en hora local (el servidor
+        // corre en horario de Argentina) y se convierten a UTC para comparar contra
+        // Venta.Fecha, que se guarda en UTC. La semana arranca el lunes, igual que
+        // en el calendario de entregas del Home.
+        var hoyLocal = DateTime.Today;
+        var inicioSemanaLocal = hoyLocal.AddDays(-((7 + (int)hoyLocal.DayOfWeek - 1) % 7));
+        var inicioMesLocal = new DateTime(hoyLocal.Year, hoyLocal.Month, 1);
+
+        var hoyInicioUtc = DateTime.SpecifyKind(hoyLocal, DateTimeKind.Local).ToUniversalTime();
+        var semanaInicioUtc = DateTime.SpecifyKind(inicioSemanaLocal, DateTimeKind.Local).ToUniversalTime();
+        var mesInicioUtc = DateTime.SpecifyKind(inicioMesLocal, DateTimeKind.Local).ToUniversalTime();
+
+        var ventasDelMes = await db.Ventas
+            .Include(v => v.Presupuesto).ThenInclude(p => p.Cliente)
+            .Where(v => v.Fecha >= mesInicioUtc)
+            .OrderByDescending(v => v.Fecha)
+            .ToListAsync();
+
+        _ventasDelMes = ventasDelMes;
+        _facturacionMes = ventasDelMes.Sum(v => v.Total);
+        _ventasMes = ventasDelMes.Count;
+
+        var ventasSemana = ventasDelMes.Where(v => v.Fecha >= semanaInicioUtc).ToList();
+        _facturacionSemana = ventasSemana.Sum(v => v.Total);
+        _ventasSemana = ventasSemana.Count;
+
+        var ventasHoy = ventasSemana.Where(v => v.Fecha >= hoyInicioUtc).ToList();
+        _facturacionHoy = ventasHoy.Sum(v => v.Total);
+        _ventasHoy = ventasHoy.Count;
+
+        await CargarVentasPorMesAsync(db, inicioMesLocal);
+        await CargarRankingMaterialesAsync(db);
+
+        _loading = false;
+    }
+
+    // Últimos 12 meses (incluyendo el actual), en orden cronológico. Se arma la
+    // lista completa de meses primero (con 0 ventas) y después se completa con lo
+    // que haya en la base, para que los meses sin ventas también aparezcan en el eje.
+    private async Task CargarVentasPorMesAsync(ApplicationDbContext db, DateTime inicioMesActualLocal)
+    {
+        var primerMesLocal = inicioMesActualLocal.AddMonths(-11);
+        var desdeUtc = DateTime.SpecifyKind(primerMesLocal, DateTimeKind.Local).ToUniversalTime();
+
+        var ventas = await db.Ventas
+            .Where(v => v.Fecha >= desdeUtc)
+            .Select(v => v.Fecha)
+            .ToListAsync();
+
+        var conteoPorMes = ventas
+            .GroupBy(f => new { f.ToLocalTime().Year, f.ToLocalTime().Month })
+            .ToDictionary(g => (g.Key.Year, g.Key.Month), g => g.Count());
+
+        var etiquetas = new List<string>();
+        var valores = new List<double>();
+        for (var i = 0; i < 12; i++)
+        {
+            var mes = primerMesLocal.AddMonths(i);
+            etiquetas.Add($"{_nombresMesesAbrev[mes.Month - 1]} {mes.Year % 100:D2}");
+            valores.Add(conteoPorMes.GetValueOrDefault((mes.Year, mes.Month), 0));
+        }
+
+        _labelsVentasPorMes = etiquetas.ToArray();
+        _serieVentasPorMes = new List<ChartSeries<double>>
+        {
+            new() { Name = "Ventas", Data = valores.ToArray() },
+        };
+    }
+
+    // Ranking histórico (todas las ventas) por m² vendidos de cada material. Se agrupa
+    // por NombreMaterialCongelado (no por MaterialId) porque el material de catálogo
+    // puede haberse editado o borrado después de la venta.
+    private async Task CargarRankingMaterialesAsync(ApplicationDbContext db)
+    {
+        var presupuestoIdsVendidos = await db.Ventas.Select(v => v.PresupuestoId).ToListAsync();
+        var piezasVendidas = await db.PresupuestoPiezas
+            .Where(p => presupuestoIdsVendidos.Contains(p.PresupuestoId))
+            .Include(p => p.Tramos)
+            .ToListAsync();
+
+        var ranking = piezasVendidas
+            .GroupBy(p => p.NombreMaterialCongelado)
+            .Select(g => new { Material = g.Key, AreaM2 = g.Sum(PresupuestoCalculos.AreaM2) })
+            .OrderByDescending(x => x.AreaM2)
+            .Take(8)
+            .ToList();
+
+        _labelsMateriales = ranking.Select(x => x.Material).ToArray();
+        _serieMateriales = new List<ChartSeries<double>>
+        {
+            new() { Name = "m² vendidos", Data = ranking.Select(x => (double)x.AreaM2).ToArray() },
+        };
+    }
+}

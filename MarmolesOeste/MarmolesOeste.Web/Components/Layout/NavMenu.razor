@@ -1,0 +1,23 @@
+<MudNavMenu>
+    <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Home">Inicio</MudNavLink>
+    <MudNavLink Href="presupuestos" Icon="@Icons.Material.Filled.Description">Presupuestos</MudNavLink>
+    <MudNavLink Href="ventas" Icon="@Icons.Material.Filled.PointOfSale">Ventas</MudNavLink>
+    <MudNavLink Href="produccion" Icon="@Icons.Material.Filled.Handyman">Producción</MudNavLink>
+    <MudNavLink Href="entregas" Icon="@Icons.Material.Filled.LocalShipping">Entregas</MudNavLink>
+    <MudNavLink Href="stock" Icon="@Icons.Material.Filled.Inventory">Stock</MudNavLink>
+    <MudNavLink Href="caja" Icon="@Icons.Material.Filled.AccountBalanceWallet">Caja</MudNavLink>
+    <MudNavLink Href="facturacion" Icon="@Icons.Material.Filled.TrendingUp">Facturación</MudNavLink>
+    <MudNavLink Href="tareas" Icon="@Icons.Material.Filled.Checklist">Tareas</MudNavLink>
+
+    <MudNavGroup Title="Catálogo" Icon="@Icons.Material.Filled.Category" Expanded="true">
+        <AuthorizeView Roles="@Roles.Dueno">
+            <Authorized>
+                <MudNavLink Href="materiales" Icon="@Icons.Material.Filled.Layers">Materiales</MudNavLink>
+                <MudNavLink Href="terminaciones-canto" Icon="@Icons.Material.Filled.Timeline">Terminaciones de canto</MudNavLink>
+                <MudNavLink Href="adicionales" Icon="@Icons.Material.Filled.AddCircleOutline">Adicionales</MudNavLink>
+                <MudNavLink Href="empleados" Icon="@Icons.Material.Filled.Badge">Empleados</MudNavLink>
+            </Authorized>
+        </AuthorizeView>
+        <MudNavLink Href="clientes" Icon="@Icons.Material.Filled.People">Clientes</MudNavLink>
+    </MudNavGroup>
+</MudNavMenu>

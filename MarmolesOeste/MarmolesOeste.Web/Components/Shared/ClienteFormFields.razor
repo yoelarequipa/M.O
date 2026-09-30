@@ -1,0 +1,21 @@
+@* Campos del formulario de Cliente, compartidos entre el ABM de Clientes y el
+   diálogo de "asignar cliente" desde un presupuesto, para no duplicar el form. *@
+
+<MudForm @ref="_form" Model="Model">
+    <MudTextField @bind-Value="Model.Nombre" Label="Nombre" Required="true" RequiredError="El nombre es obligatorio" Class="mb-2" />
+    <MudTextField @bind-Value="Model.Telefono" Label="Teléfono" Class="mb-2" />
+    <MudTextField @bind-Value="Model.Email" Label="Email" InputType="InputType.Email" Class="mb-2" />
+    <MudTextField @bind-Value="Model.DireccionObra" Label="Dirección de la obra" Lines="2" />
+</MudForm>
+
+@code {
+    [Parameter] public Cliente Model { get; set; } = new();
+
+    private MudForm _form = null!;
+
+    public async Task<bool> ValidateAsync()
+    {
+        await _form.ValidateAsync();
+        return _form.IsValid;
+    }
+}

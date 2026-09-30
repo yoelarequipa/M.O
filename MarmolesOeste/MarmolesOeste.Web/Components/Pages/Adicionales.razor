@@ -1,0 +1,117 @@
+@page "/adicionales"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = Roles.Dueno)]
+@using MarmolesOeste.Web.Components.Dialogs
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<PageTitle>Adicionales</PageTitle>
+
+<MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h4">Adicionales</MudText>
+    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3">
+        @if (_ultimaActualizacion is not null)
+        {
+            <MudPaper Class="pa-2 px-3" Outlined="true">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Última actualización</MudText>
+                <MudText Typo="Typo.body2">
+                    @_ultimaActualizacion.FechaUltimaActualizacion!.Value.ToLocalTime().ToString("dd/MM/yyyy")
+                    — @_ultimaActualizacion.Nombre: @_ultimaActualizacion.MotivoUltimaActualizacion
+                </MudText>
+            </MudPaper>
+        }
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreateAsync">
+            Nuevo adicional
+        </MudButton>
+    </MudStack>
+</MudStack>
+
+<MudTable Items="_adicionales" Loading="_loading" Hover="true">
+    <HeaderContent>
+        <MudTh>Nombre</MudTh>
+        <MudTh>Unidad de medida</MudTh>
+        <MudTh>Precio</MudTh>
+        <MudTh></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Nombre">@context.Nombre</MudTd>
+        <MudTd DataLabel="Unidad de medida">@context.UnidadMedida</MudTd>
+        <MudTd DataLabel="Precio">@context.Precio.ToString("C2")</MudTd>
+        <MudTd>
+            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => OpenEditAsync(context)" />
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DarDeBajaAsync(context)" />
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText>No hay adicionales cargados.</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@code {
+    private List<Adicional> _adicionales = new();
+    private Adicional? _ultimaActualizacion;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _adicionales = await db.Adicionales.OrderBy(a => a.Nombre).ToListAsync();
+        _ultimaActualizacion = _adicionales
+            .Where(a => a.FechaUltimaActualizacion is not null)
+            .OrderByDescending(a => a.FechaUltimaActualizacion)
+            .FirstOrDefault();
+        _loading = false;
+    }
+
+    private async Task OpenCreateAsync()
+    {
+        var reference = await DialogService.ShowAsync<AdicionalEditDialog>("Nuevo adicional");
+        var result = await reference.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task OpenEditAsync(Adicional adicional)
+    {
+        var parameters = new DialogParameters<AdicionalEditDialog> { { x => x.AdicionalId, adicional.Id } };
+        var reference = await DialogService.ShowAsync<AdicionalEditDialog>("Editar adicional", parameters);
+        var result = await reference.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task DarDeBajaAsync(Adicional adicional)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { x => x.Title, "Confirmar baja" },
+            { x => x.Message, $"¿Dar de baja \"{adicional.Nombre}\"?" },
+            { x => x.ConfirmText, "Dar de baja" },
+        };
+        var reference = await DialogService.ShowAsync<ConfirmDialog>(null, parameters);
+        var result = await reference.Result;
+
+        if (result is not { Canceled: false })
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.Adicionales.FindAsync(adicional.Id);
+        if (entity is not null)
+        {
+            entity.FechaBaja = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            Snackbar.Add("Adicional dado de baja.", Severity.Success);
+            await LoadAsync();
+        }
+    }
+}

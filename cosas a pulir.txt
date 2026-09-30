@@ -1,0 +1,33 @@
+Cosas a tener en cuenta:
+1.Cerrar el registro público y armar una pantalla simple para que el dueño cree cuentas de empleado — es el único punto que es más un problema de seguridad que de prolijidad.
+2. ✅
+3.Una pasada de estrés liviana sobre casos raros que todavía no probamos (presupuestos con varias piezas, PDF con muchas piezas, descuento/IVA en 0 o 100%).
+4.Control de stock por placas y m2.
+5.Creacion rapida de presupuestos sin clientes ✅☑✔🆗
+6.Permiter asignarle el presupuesto rapido a un cliente existente o nuevo.✅
+7.Control de estado de pago de la venta (Señado %, pago total)✅
+8.Al cargar un ingreso a la caja, al elegir el presupuesto que cargue automaticamente el monto total del mismo.(Luego podemos modificar en caso de seña) (Ya no es tan necesario)
+9.Calados de bacha/anafe en el presupuesto (Visual)✅	
+10.Formas en U con distintas medidas en lados.
+11.Posibilidad de elegir la profundidad por lado.
+12. Agregar calendario para ver entregas. ✅	
+13. Seccion para ver facturacion por dias/semana/mensual.✅
+14. Seccion para manejar el flujo de empleados. ✅
+15. Seccion para ver que esta haciendo cada empleado ✅
+16. Seccion para ver datos de empleados/sueldos/antiguedad/vacaciones/dias que faltó/etc.
+17.En la seccion de clientes, poder ver el historial de compras del cliente.✅
+18. Control de stock para bachas/material(silicona,discos,tizas)
+19. Control de catalogo actualizado(poder ver ultima fecha que fue actualizado)✅
+20. Poder ver en el calendario o alguna parte del home proxima fecha de restock de camion. ✅
+21.Pensar bien lo del presupuesto enviado, tanto en home como ver utilidad.
+22.Alerta de stock bajo ✅
+22.Ultimas ventas generadas al home. ✅
+22.Total facturado en el dia en el home. ✅
+23.Historial para comparar ventas por mes.✅
+24.Ranking de materiales mas vendidos.✅
+25.Total facturado por semana/mes. ✅
+26.Ultima actividad reciente.(historial de actividad del dia)✅
+27.Resumen de ayer.
+28.Exportar caja del mes, bajar resumen mensual de la caja.✅
+29.Facturación ✅
+30.Tareas de hoy en el home. ✅

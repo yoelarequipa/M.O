@@ -1,0 +1,121 @@
+@page "/materiales"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = Roles.Dueno)]
+@using MarmolesOeste.Web.Components.Dialogs
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<PageTitle>Materiales</PageTitle>
+
+<MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h4">Materiales</MudText>
+    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3">
+        @if (_ultimaActualizacion is not null)
+        {
+            <MudPaper Class="pa-2 px-3" Outlined="true">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Última actualización</MudText>
+                <MudText Typo="Typo.body2">
+                    @_ultimaActualizacion.FechaUltimaActualizacion!.Value.ToLocalTime().ToString("dd/MM/yyyy")
+                    — @_ultimaActualizacion.Nombre: @_ultimaActualizacion.MotivoUltimaActualizacion
+                </MudText>
+            </MudPaper>
+        }
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreateAsync">
+            Nuevo material
+        </MudButton>
+    </MudStack>
+</MudStack>
+
+<MudTable Items="_materiales" Loading="_loading" Hover="true">
+    <HeaderContent>
+        <MudTh>Nombre</MudTh>
+        <MudTh>Tipo</MudTh>
+        <MudTh>Espesor</MudTh>
+        <MudTh>Precio / m²</MudTh>
+        <MudTh>Precio / ml zócalo</MudTh>
+        <MudTh></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Nombre">@context.Nombre</MudTd>
+        <MudTd DataLabel="Tipo">@context.Tipo</MudTd>
+        <MudTd DataLabel="Espesor">@context.Espesor.ToString("N1") cm</MudTd>
+        <MudTd DataLabel="Precio / m²">@context.PrecioPorM2.ToString("C2")</MudTd>
+        <MudTd DataLabel="Precio / ml zócalo">@context.PrecioPorMetroLinealZocalo.ToString("C2")</MudTd>
+        <MudTd>
+            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => OpenEditAsync(context)" />
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DarDeBajaAsync(context)" />
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText>No hay materiales cargados.</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@code {
+    private List<Material> _materiales = new();
+    private Material? _ultimaActualizacion;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _materiales = await db.Materiales.OrderBy(m => m.Nombre).ToListAsync();
+        _ultimaActualizacion = _materiales
+            .Where(m => m.FechaUltimaActualizacion is not null)
+            .OrderByDescending(m => m.FechaUltimaActualizacion)
+            .FirstOrDefault();
+        _loading = false;
+    }
+
+    private async Task OpenCreateAsync()
+    {
+        var reference = await DialogService.ShowAsync<MaterialEditDialog>("Nuevo material");
+        var result = await reference.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task OpenEditAsync(Material material)
+    {
+        var parameters = new DialogParameters<MaterialEditDialog> { { x => x.MaterialId, material.Id } };
+        var reference = await DialogService.ShowAsync<MaterialEditDialog>("Editar material", parameters);
+        var result = await reference.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task DarDeBajaAsync(Material material)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { x => x.Title, "Confirmar baja" },
+            { x => x.Message, $"¿Dar de baja el material \"{material.Nombre}\"? No se borra, pero deja de estar disponible para nuevos presupuestos." },
+            { x => x.ConfirmText, "Dar de baja" },
+        };
+        var reference = await DialogService.ShowAsync<ConfirmDialog>(null, parameters);
+        var result = await reference.Result;
+
+        if (result is not { Canceled: false })
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.Materiales.FindAsync(material.Id);
+        if (entity is not null)
+        {
+            entity.FechaBaja = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            Snackbar.Add("Material dado de baja.", Severity.Success);
+            await LoadAsync();
+        }
+    }
+}

@@ -1,0 +1,209 @@
+@* Calendario mensual simple: marca los días con entregas y con llegadas de
+   camión programadas, y al hacer clic muestra el detalle de ese día en el mismo
+   lugar. MudBlazor no trae un componente de calendario, así que este es liviano
+   y hecho a medida. *@
+
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<MudPaper Class="pa-4">
+    @if (_diaSeleccionado is null)
+    {
+        <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-2">
+            <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" OnClick="MesAnteriorAsync" />
+            <MudText Typo="Typo.h6" Style="text-transform:capitalize">@_mesActual.ToString("MMMM yyyy", _cultura)</MudText>
+            <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" OnClick="MesSiguienteAsync" />
+        </MudStack>
+
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;">
+            @foreach (var nombreDia in NombresDias)
+            {
+                <div style="font-size:0.75rem;font-weight:600;text-align:center;color:var(--mud-palette-text-secondary);padding:4px 0;">@nombreDia</div>
+            }
+            @foreach (var celda in _celdas)
+            {
+                @if (celda.Dia is null)
+                {
+                    <div></div>
+                }
+                else
+                {
+                    var entregasDelDia = EntregasEnFecha(celda.Fecha!.Value);
+                    var llegadasDelDia = LlegadasEnFecha(celda.Fecha!.Value);
+                    var esHoy = celda.Fecha!.Value.Date == DateTime.UtcNow.Date;
+                    <div style="@EstiloCelda(entregasDelDia, llegadasDelDia, esHoy)" @onclick="@(() => SeleccionarDia(celda.Fecha!.Value, entregasDelDia, llegadasDelDia))">
+                        <div>@celda.Dia</div>
+                        @if (entregasDelDia.Count > 0)
+                        {
+                            <div style="font-size:0.7rem">@entregasDelDia.Count entrega@(entregasDelDia.Count > 1 ? "s" : "")</div>
+                        }
+                        @if (llegadasDelDia.Count > 0)
+                        {
+                            <div style="font-size:0.9rem">🚚</div>
+                        }
+                    </div>
+                }
+            }
+        </div>
+
+        <MudStack Row="true" Spacing="4" Class="mt-2">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <div style="width:12px;height:12px;border-radius:3px;background-color:var(--mud-palette-primary)"></div>
+                <MudText Typo="Typo.caption">Entrega pendiente</MudText>
+            </MudStack>
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <div style="width:12px;height:12px;border-radius:3px;background-color:var(--mud-palette-success)"></div>
+                <MudText Typo="Typo.caption">Entregado</MudText>
+            </MudStack>
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudText Typo="Typo.caption">🚚 Llegada de camión</MudText>
+            </MudStack>
+        </MudStack>
+    }
+    else
+    {
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+            <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" OnClick="VolverAlMes" />
+            <MudText Typo="Typo.h6">@_diaSeleccionado.Value.ToString("dd/MM/yyyy")</MudText>
+        </MudStack>
+
+        @if (_llegadasSeleccionadas.Count > 0)
+        {
+            <MudText Typo="Typo.subtitle2" Class="mb-1">🚚 Llegadas de camión</MudText>
+            @foreach (var llegada in _llegadasSeleccionadas)
+            {
+                <MudLink Href="/stock" Class="d-block mb-1">@llegada.Descripcion</MudLink>
+            }
+            <MudDivider Class="my-2" />
+        }
+
+        <MudText Typo="Typo.subtitle2" Class="mb-1">Entregas</MudText>
+        @if (_entregasSeleccionadas.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Color="Color.Secondary">No hay entregas ese día.</MudText>
+        }
+        else
+        {
+            @foreach (var entrega in _entregasSeleccionadas)
+            {
+                <MudLink Href="@($"/ventas/{entrega.VentaId}")" Class="d-block mb-1">
+                    @entrega.Venta.Presupuesto.Cliente!.Nombre — @entrega.Direccion (@entrega.Estado)
+                </MudLink>
+            }
+        }
+    }
+</MudPaper>
+
+@code {
+    private static readonly string[] NombresDias = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+    private static readonly System.Globalization.CultureInfo _cultura = System.Globalization.CultureInfo.GetCultureInfo("es-AR");
+
+    private DateTime _mesActual = new(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+    private List<Entrega> _entregasDelMes = new();
+    private List<LlegadaStock> _llegadasDelMes = new();
+    private List<Celda> _celdas = new();
+    private DateTime? _diaSeleccionado;
+    private List<Entrega> _entregasSeleccionadas = new();
+    private List<LlegadaStock> _llegadasSeleccionadas = new();
+
+    protected override async Task OnInitializedAsync() => await CargarMesAsync();
+
+    private async Task CargarMesAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var desde = _mesActual;
+        var hasta = _mesActual.AddMonths(1);
+        _entregasDelMes = await db.Entregas
+            .Include(e => e.Venta).ThenInclude(v => v.Presupuesto).ThenInclude(p => p.Cliente)
+            .Where(e => e.FechaProgramada >= desde && e.FechaProgramada < hasta)
+            .ToListAsync();
+        _llegadasDelMes = await db.LlegadasStock
+            .Where(l => !l.Recibido && l.FechaEstimada >= desde && l.FechaEstimada < hasta)
+            .ToListAsync();
+
+        ConstruirCeldas();
+        _diaSeleccionado = null;
+        _entregasSeleccionadas = new();
+        _llegadasSeleccionadas = new();
+    }
+
+    private void ConstruirCeldas()
+    {
+        _celdas = new List<Celda>();
+
+        // La semana arranca en lunes; DayOfWeek de .NET arranca en domingo (0).
+        var primerDiaSemana = ((int)_mesActual.DayOfWeek + 6) % 7;
+        for (var i = 0; i < primerDiaSemana; i++)
+        {
+            _celdas.Add(new Celda(null, null));
+        }
+
+        var diasEnMes = DateTime.DaysInMonth(_mesActual.Year, _mesActual.Month);
+        for (var dia = 1; dia <= diasEnMes; dia++)
+        {
+            _celdas.Add(new Celda(dia, new DateTime(_mesActual.Year, _mesActual.Month, dia, 0, 0, 0, DateTimeKind.Utc)));
+        }
+    }
+
+    private List<Entrega> EntregasEnFecha(DateTime fecha) =>
+        _entregasDelMes.Where(e => e.FechaProgramada.Date == fecha.Date).ToList();
+
+    private List<LlegadaStock> LlegadasEnFecha(DateTime fecha) =>
+        _llegadasDelMes.Where(l => l.FechaEstimada.Date == fecha.Date).ToList();
+
+    private static string EstiloCelda(List<Entrega> entregas, List<LlegadaStock> llegadas, bool esHoy)
+    {
+        var baseEstilo = "border-radius:8px;padding:6px 2px;text-align:center;min-height:44px;";
+        baseEstilo += esHoy ? "border:2px solid var(--mud-palette-primary);" : "border:2px solid transparent;";
+
+        if (entregas.Count == 0 && llegadas.Count == 0)
+        {
+            return baseEstilo;
+        }
+
+        baseEstilo += "cursor:pointer;";
+
+        if (entregas.Count == 0)
+        {
+            // Solo llegada de camión, sin entregas ese día.
+            return baseEstilo + "background-color:var(--mud-palette-warning);color:var(--mud-palette-warning-text);";
+        }
+
+        var hayPendientes = entregas.Any(e => e.Estado is EstadoEntrega.Programada or EstadoEntrega.EnCamino);
+        return baseEstilo + (hayPendientes
+            ? "background-color:var(--mud-palette-primary);color:var(--mud-palette-primary-text);"
+            : "background-color:var(--mud-palette-success);color:var(--mud-palette-success-text);");
+    }
+
+    private void SeleccionarDia(DateTime fecha, List<Entrega> entregas, List<LlegadaStock> llegadas)
+    {
+        if (entregas.Count == 0 && llegadas.Count == 0)
+        {
+            return;
+        }
+
+        _diaSeleccionado = fecha;
+        _entregasSeleccionadas = entregas;
+        _llegadasSeleccionadas = llegadas;
+    }
+
+    private void VolverAlMes()
+    {
+        _diaSeleccionado = null;
+        _entregasSeleccionadas = new();
+        _llegadasSeleccionadas = new();
+    }
+
+    private async Task MesAnteriorAsync()
+    {
+        _mesActual = _mesActual.AddMonths(-1);
+        await CargarMesAsync();
+    }
+
+    private async Task MesSiguienteAsync()
+    {
+        _mesActual = _mesActual.AddMonths(1);
+        await CargarMesAsync();
+    }
+
+    private sealed record Celda(int? Dia, DateTime? Fecha);
+}

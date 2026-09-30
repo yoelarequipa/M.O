@@ -1,0 +1,92 @@
+@page "/produccion"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ISnackbar Snackbar
+@inject NavigationManager NavigationManager
+
+<PageTitle>Producción</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Producción</MudText>
+
+<MudTable Items="_ordenes" Loading="_loading" Hover="true">
+    <HeaderContent>
+        <MudTh>Cliente</MudTh>
+        <MudTh>Presupuesto</MudTh>
+        <MudTh>Estado</MudTh>
+        <MudTh>Inicio</MudTh>
+        <MudTh></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Cliente">@context.Venta.Presupuesto.Cliente!.Nombre</MudTd>
+        <MudTd DataLabel="Presupuesto">
+            <MudLink Href="@($"/ventas/{context.VentaId}")">Nº @context.Venta.Presupuesto.NumeroCorrelativo</MudLink>
+        </MudTd>
+        <MudTd DataLabel="Estado">@context.Estado</MudTd>
+        <MudTd DataLabel="Inicio">@(context.FechaInicio?.ToLocalTime().ToString("dd/MM/yyyy") ?? "-")</MudTd>
+        <MudTd>
+            @if (context.Estado == EstadoOrdenProduccion.Pendiente)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" OnClick="() => IniciarAsync(context)">Iniciar</MudButton>
+            }
+            @if (context.Estado == EstadoOrdenProduccion.EnProceso)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Success" OnClick="() => TerminarAsync(context)">Terminar</MudButton>
+            }
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText>No hay órdenes de producción todavía.</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@code {
+    private List<OrdenProduccion> _ordenes = new();
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _ordenes = await db.OrdenesProduccion
+            .Include(o => o.Venta).ThenInclude(v => v.Presupuesto).ThenInclude(p => p.Cliente)
+            .OrderBy(o => o.Estado)
+            .ThenBy(o => o.FechaInicio)
+            .ToListAsync();
+        _loading = false;
+    }
+
+    private async Task IniciarAsync(OrdenProduccion orden)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entidad = await db.OrdenesProduccion.FindAsync(orden.Id);
+        if (entidad is null)
+        {
+            return;
+        }
+
+        entidad.Estado = EstadoOrdenProduccion.EnProceso;
+        entidad.FechaInicio = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        Snackbar.Add("Producción iniciada.", Severity.Success);
+        await LoadAsync();
+    }
+
+    private async Task TerminarAsync(OrdenProduccion orden)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entidad = await db.OrdenesProduccion.FindAsync(orden.Id);
+        if (entidad is null)
+        {
+            return;
+        }
+
+        entidad.Estado = EstadoOrdenProduccion.Terminada;
+        entidad.FechaFin = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        Snackbar.Add("Producción terminada.", Severity.Success);
+        await LoadAsync();
+    }
+}

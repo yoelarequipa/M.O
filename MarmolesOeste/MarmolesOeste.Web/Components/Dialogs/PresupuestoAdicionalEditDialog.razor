@@ -1,0 +1,80 @@
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<MudDialog>
+    <TitleContent>Agregar adicional</TitleContent>
+    <DialogContent>
+        <MudForm @ref="_form">
+            <MudSelect T="int" @bind-Value="_adicionalId" Label="Adicional" Required="true" RequiredError="Elegí un adicional" Class="mb-2">
+                @foreach (var adicional in _adicionales)
+                {
+                    <MudSelectItem T="int" Value="@adicional.Id">@adicional.Nombre (@adicional.Precio.ToString("C2") / @adicional.UnidadMedida)</MudSelectItem>
+                }
+            </MudSelect>
+            <MudNumericField @bind-Value="_cantidad" Label="@CantidadLabel()" Required="true" Min="0.01m" Format="N2" />
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancelar</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Guardar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public int PresupuestoId { get; set; }
+
+    private MudForm _form = null!;
+    private List<Adicional> _adicionales = new();
+    private int _adicionalId;
+    private decimal _cantidad = 1m;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _adicionales = await db.Adicionales.OrderBy(a => a.Nombre).ToListAsync();
+    }
+
+    private string CantidadLabel()
+    {
+        var unidad = _adicionales.FirstOrDefault(a => a.Id == _adicionalId)?.UnidadMedida;
+        return unidad switch
+        {
+            UnidadMedidaAdicional.Unidad => "Cantidad (unidades)",
+            UnidadMedidaAdicional.MetroLineal => "Cantidad (metros lineales)",
+            UnidadMedidaAdicional.MetroCuadrado => "Cantidad (metros cuadrados)",
+            _ => "Cantidad",
+        };
+    }
+
+    private async Task SaveAsync()
+    {
+        await _form.ValidateAsync();
+        if (!_form.IsValid || _adicionalId == 0)
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var adicional = await db.Adicionales.FindAsync(_adicionalId);
+        if (adicional is null)
+        {
+            return;
+        }
+
+        db.PresupuestoAdicionales.Add(new PresupuestoAdicional
+        {
+            PresupuestoId = PresupuestoId,
+            AdicionalId = adicional.Id,
+            NombreAdicionalCongelado = adicional.Nombre,
+            PrecioAdicionalCongelado = adicional.Precio,
+            Cantidad = adicional.UnidadMedida == UnidadMedidaAdicional.Global ? 1m : _cantidad,
+        });
+
+        await db.SaveChangesAsync();
+        await PresupuestoCalculos.RecalcularTotalesAsync(db, PresupuestoId);
+
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}
